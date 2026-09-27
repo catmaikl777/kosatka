@@ -333,10 +333,16 @@ function makeClient(label) {
   sb.WebSocket = CountingWS;
   vm.createContext(sb);
   for (const f of scripts) {
-    try { vm.runInContext(read('js/' + f), sb, { filename: f }); }
+    /* Адрес тестового сервера вшиваем ДО загрузки скриптов. boot вызывает
+       connect() сразу, поэтому подмена после загрузки иногда проигрывала
+       гонку с первым подключением: в собранном dist там уже вписан адрес
+       деплоя, и клиент уходил в connecting (красный CI). */
+    let src = read('js/' + f);
+    if (f === 'config') src = src.replace(/server:\s*(['"])[^'"]*\1/, 'server: ' + JSON.stringify(TEST_WS));
+    try { vm.runInContext(src, sb, { filename: f }); }
     catch (e) { errors.push('load ' + f + ': ' + e.message); }
   }
-  /* после загрузки скриптов подменяем адрес: иначе в dist он был бы вшит деплоем */
+  /* и подстраховка после загрузки: адрес должен быть тестовым в любом случае */
   if (sb.PO_CONFIG) sb.PO_CONFIG.server = TEST_WS;
   const frames = (n) => { for (let i = 0; i < n; i++) { const q = rafQ.splice(0, rafQ.length); for (const fn of q) { try { fn(Date.now()); } catch (e) { errors.push('raf: ' + e.message); } } } };
   const topSent = () => Object.entries(sent).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => t + '=' + n).join(' ');
