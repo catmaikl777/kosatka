@@ -599,10 +599,17 @@ ok('ивент: сервер отдал информацию о сезоне', !
 
 /* ================= 8. устойчивость: сервер валит соединение ================= */
 srv.kill('SIGKILL');
-await sleep(1500);
+/* После падения клиент обязан выйти из online. Дальше он честно мигает
+   connecting/offline, пока переподключается (800мс, 1600мс, …), поэтому
+   проверять надо «не online», а не конкретное слово статуса: иначе
+   проверка ловит момент попадания в окно переподключения. */
+const leftOnline = await waitFrame(A, () => A.sb.API.status !== 'online', 6000);
+await sleep(300);
+ok('клиент заметил падение сервера', leftOnline, A.sb.API.status);
 ok('клиент пережил обрыв сервера', A.errors.filter(e => !e.includes('ERR_CONNECTION')).length === 0,
   A.errors.filter(e => !e.includes('ERR_CONNECTION')).slice(0, 2).join(' | '));
-ok('статус клиента — offline после падения', A.sb.API.status === 'offline', A.sb.API.status);
+ok('статус клиента не «online» после падения (мигает connecting/offline)',
+  A.sb.API.status === 'offline' || A.sb.API.status === 'connecting', A.sb.API.status);
 ok(' PvP недоступен офлайн (кнопка бота вместо сети)', A.sb.BATTLE ? true : true);
 
 console.log('');
