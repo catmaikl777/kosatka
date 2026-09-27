@@ -66,6 +66,8 @@ jobs:
           ls -la dist
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true      # создать сайт Pages, если его ещё нет
 
       - uses: actions/upload-pages-artifact@v3
         with:
