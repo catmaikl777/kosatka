@@ -320,6 +320,9 @@ function makeClient(label) {
   const sent = {};
   const NativeWS = sb.WebSocket;
   function CountingWS(url) {
+    /* печатаем каждый фактический адрес: если конструктор зовётся с чужим
+       url или не зовётся вовсе — это видно сразу, а не по догадкам */
+    console.log('    · WebSocket(' + url + ')');
     const ws = new NativeWS(url);
     const nativeSend = ws.send.bind(ws);
     ws.send = (data) => {
@@ -338,12 +341,14 @@ function makeClient(label) {
        гонку с первым подключением: в собранном dist там уже вписан адрес
        деплоя, и клиент уходил в connecting (красный CI). */
     let src = read('js/' + f);
-    if (f === 'config') src = src.replace(/server:\s*(['"])[^'"]*\1/, 'server: ' + JSON.stringify(TEST_WS));
+    if (f === 'config.js') src = src.replace(/server:\s*(['"])[^'"]*\1/, 'server: ' + JSON.stringify(TEST_WS));
     try { vm.runInContext(src, sb, { filename: f }); }
     catch (e) { errors.push('load ' + f + ': ' + e.message); }
   }
   /* и подстраховка после загрузки: адрес должен быть тестовым в любом случае */
   if (sb.PO_CONFIG) sb.PO_CONFIG.server = TEST_WS;
+  console.log('    · config.server = ' + JSON.stringify(sb.PO_CONFIG && sb.PO_CONFIG.server) +
+    ', адрес для подключения = ' + (sb.API ? sb.API.serverUrl : '?'));
   const frames = (n) => { for (let i = 0; i < n; i++) { const q = rafQ.splice(0, rafQ.length); for (const fn of q) { try { fn(Date.now()); } catch (e) { errors.push('raf: ' + e.message); } } } };
   const topSent = () => Object.entries(sent).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => t + '=' + n).join(' ');
   const c = { sb, doc, store, errors, frames, label, sent, topSent, logLines };
@@ -587,6 +592,10 @@ if (raidStart) {
   const acks = [];
   A.sb.API.on('raid:clicks:ok', (t) => acks.push(t));
   A.sb.API.on('raid:tick', (t) => { if (!firstTickAt) firstTickAt = Date.now(); raidTicks.push(t); });
+  /* Слушатель результата вешаем ДО кликов: рейд заканчивается и по достижении
+     цели по счёту, то есть может завершиться прямо во время кликов. Слушатель,
+     поставленный после кликов, такое событие просто терял. */
+  const endR = waitEvent(A, 'raid:end', 45000).catch(() => null);
   let n = 0;
   /* кликаем по-настоящему и прокручиваем кадр: пакет кликов уходит
      при сбросе батча, который тоже живёт в игровом цикле */
@@ -599,11 +608,10 @@ if (raidStart) {
     `тиков=${raidTicks.length}, первый тик через ${firstTickAt ? firstTickAt - clickT0 : -1}мс, ` +
     `лучший you=${best}, ack=${bestAck}, отправлено raid:clicks=${A.sent['raid:clicks'] || 0}, ` +
     `последний тик=${JSON.stringify(raidTicks[raidTicks.length - 1])}`);
-  /* ждём дольше RAID_MS из окружения теста (20000), иначе таймаут ожидания
-     короче самого боя */
-  const endR = waitEvent(A, 'raid:end', 30000).catch((e) => null);
-  const rend = await Promise.race([endR, sleep(30000).then(() => null)]);
-  ok('рейд: бой завершился результатом', !!rend, rend ? `победитель=${rend.winner || rend.win}` : 'таймаут');
+  const rend = await Promise.race([endR, sleep(45000).then(() => null)]);
+  ok('рейд: бой завершился результатом', !!rend, rend ? `победитель=${rend.winner || rend.win}`
+    : `таймаут: тиков=${raidTicks.length}, боевой режим=${A.sb.CLICK.battleMode}, ` +
+      `последний тик=${JSON.stringify(raidTicks[raidTicks.length - 1])}`);
 }
 
 /* ================= 7. ивент ================= */
