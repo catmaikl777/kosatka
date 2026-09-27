@@ -83,8 +83,8 @@ const dumpSrv = () => {
   }
   try {
     const raw = fs.readFileSync(SRV_LOG_FILE, 'utf8');
-    console.log('  ── лог сервера ──');
-    console.log(raw.split('\n').filter(l => /flood|slow|\[ws\]|auth/i.test(l)).slice(-25).join('\n'));
+    console.log('  ── лог сервера (последние 30 строк) ──');
+    console.log(raw.split('\n').slice(-31).join('\n'));
   } catch (e) {}
 };
 process.on('uncaughtException', (e) => { console.log('  ! необработанное исключение: ' + e.message); dumpSrv(); cleanup(); process.exit(1); });
@@ -376,7 +376,15 @@ const waitFrame = async (S, cond, ms = 5000) => {
 /* ================= 1. регистрация ================= */
 const A = makeClient('A');
 await waitEvent(A, 'status', 6000).catch(() => null);
-for (let i = 0; i < 40 && A.sb.API.status !== 'online'; i++) await sleep(100);
+/* Подключение ждём щедро: на медленном CI-раннере первый хендшейк занимает
+   больше 4с, а раньше проверка брала статус один раз и успевала поймать
+   'connecting'. Плюс сразу печатаем причину, чтобы не гадать. */
+for (let i = 0; i < 150 && A.sb.API.status !== 'online'; i++) await sleep(100);
+if (A.sb.API.status !== 'online') {
+  console.log('    ! статус: ' + A.sb.API.status + ', ошибка API: ' + A.sb.API.error);
+  console.log('    ! последние строки клиента: ' + A.logLines.slice(-6).join(' | ').slice(0, 400));
+  console.log('    ! порт сервера: ' + PORT + ', сервер жив: ' + !!health);
+}
 ok(`клиент A: WebSocket-соединение (${A.label})`, A.sb.API.status === 'online', A.sb.API.status);
 
 /* адрес сервера обязан приходить из js/config.js (тот же канал, что и на деплое) */
@@ -468,11 +476,12 @@ ok('состояние клана пришло в клиент через clan:s
 ok('имя клана записалось в сейв игрока', A.sb.ST.state.clan.name === 'Стая A', String(A.sb.ST.state.clan.name));
 
 /* второй игрок: сначала регистрируется (вход обязателен), потом вступает по коду */
-const noAuth = await B.sb.API.clanJoin(clan.code).catch(() => null);
+if (!clan) console.log('    ! клан не создан, проверки вступления пропущены');
+const noAuth = clan ? await B.sb.API.clanJoin(clan.code).catch(() => null) : null;
 ok('в клан нельзя вступить без аккаунта', noAuth === null, String(noAuth));
 await B.sb.API.register('Кашалот', 'killerpass');
 await sleep(400);
-const joinClan = await B.sb.API.clanJoin(clan.code).catch(e => null);
+const joinClan = clan ? await B.sb.API.clanJoin(clan.code).catch(e => null) : null;
 ok('игрок B вступил в клан по коду', !!(joinClan && joinClan.clan && joinClan.clan.members === 2),
   JSON.stringify(joinClan && joinClan.clan));
 const health2 = await fetch(`http://127.0.0.1:${PORT}/api/health`).then(r => r.json()).catch(() => null);
