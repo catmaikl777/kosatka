@@ -502,9 +502,9 @@
 
   /* ---------- хелперы для DOM ---------- */
   function SPRHTML(name, sc) {
-    var c = SPR.get(name);
-    return '<canvas class="px-icon" width="' + (c.width * sc) + '" height="' + (c.height * sc) +
-      '" style="width:' + (c.width * sc) + 'px;height:' + (c.height * sc) + 'px" data-spr="' + name + '" data-sc="' + sc + '"></canvas>';
+    var s = SPR.size(name);
+    return '<canvas class="px-icon" width="' + (s.w * sc) + '" height="' + (s.h * sc) +
+      '" style="width:' + (s.w * sc) + 'px;height:' + (s.h * sc) + 'px" data-spr="' + name + '" data-sc="' + sc + '"></canvas>';
   }
   function orcaHTML(pal, sc) {   /* оставлено для ASCII-спрайтов и фолбэков */
     var c = SPR.get('orca', pal);

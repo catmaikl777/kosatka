@@ -249,7 +249,7 @@ npm run test:dist                 # те же живые тесты, но на �
   js/social.js          кланы, лидерборд, сезонный ивент
   js/battle.js          PvP и рейды
   js/shop.js  quests.js  rewards.js  fishing.js  fx.js  ui.js  audio.js
-  js/sprites.js         все спрайты — ASCII-сетки, рендерятся в canvas
+  js/sprites.js         спрайты: ASCII-сетки + гладкие копии картинок скинов
   js/clicker.js  js/data.js
   img/                  иконки PWA (генерируются tools/make-icons.mjs)
   server/server.js      WebSocket-сервер и вся игровая логика онлайна

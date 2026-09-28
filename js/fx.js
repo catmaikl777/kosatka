@@ -566,8 +566,9 @@
       ctx.fillStyle = b.type.color;
       ctx.fillRect(Math.round(b.x - 16), Math.round(b.y - 16 + bob), 32, 32);
       ctx.globalAlpha = 1;
+      var ssz = SPR.size(b.type.sprite);
       var spr = SPR.get(b.type.sprite);
-      ctx.drawImage(spr, Math.round(b.x - spr.width * sc / 2), Math.round(b.y - spr.height * sc / 2 + bob), spr.width * sc, spr.height * sc);
+      ctx.drawImage(spr, Math.round(b.x - ssz.w * sc / 2), Math.round(b.y - ssz.h * sc / 2 + bob), ssz.w * sc, ssz.h * sc);
     }
     /* кошка */
     var sc2 = orca.scale;
@@ -620,7 +621,8 @@
   function art() {
     var k = artKey();
     var c = SPR.get(k, stateSkinPal(), true);
-    return { w: c.width, h: c.height, canvas: c };
+    var s = SPR.size(k, stateSkinPal(), true);
+    return { w: s.w, h: s.h, canvas: c };
   }
   function layoutOrca(a) {
     orca.artW = a.w; orca.artH = a.h;
