@@ -123,6 +123,13 @@
   }
 
   /* ================= КЛАНЫ ================= */
+  /* Любая мутация клана: сначала спрашиваем у сервера каноническое
+     состояние, потом перерисовываем — так вкладка не показывает старые
+     данные даже если push не дошёл или пришёл раньше ответа. */
+  function afterClanChange(m) {
+    return API.clanMe().catch(function () {}).then(function () { refreshClans(m); });
+  }
+
   function openClans() {
     var m = UI.modalShell('КЛАНЫ',
       '<div id="clanMy"></div>' +
@@ -137,6 +144,9 @@
       '<h4 class="sec-h">Участники</h4><div id="clanMembers" class="clan-members"></div>' +
       '<h4 class="sec-h">Все кланы</h4><div id="clanList" class="clan-list">—</div>');
     refreshClans(m);
+    /* При открытии вкладки запрашиваем каноническое состояние: если push
+       clan:state был пропущен (офлайн, обрыв), вкладка сама себя чинит. */
+    API.clanMe().then(function () { refreshClans(m); }).catch(function () {});
     m.querySelector('#clanRefresh').addEventListener('click', function () { refreshClans(m); });
     m.querySelector('#clanCreate').addEventListener('click', function () {
       UI.prompt('Создать клан', 'Название клана (3–18 символов)').then(function (v) {
@@ -146,7 +156,7 @@
           root.SND.play('levelUp');
           UI.toast('Клан создан!', 'good', 'i_team');
           ST.bump('clanJoined');
-          refreshClans(m);
+          afterClanChange(m);
         }).catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); });
       });
     });
@@ -157,21 +167,21 @@
           root.SND.play('levelUp');
           UI.toast('Ты в клане!', 'good', 'i_team');
           ST.bump('clanJoined');
-          refreshClans(m);
+          afterClanChange(m);
         }).catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); });
       });
     });
     m.querySelector('#clanLeave').addEventListener('click', function () {
       UI.confirm('Выйти из клана?', 'Теряешь бонусы клана.').then(function (y) {
         if (!y) return;
-        API.clanLeave().then(function () { UI.toast('Ты вышел из клана', 'info', 'i_lock'); refreshClans(m); })
+        API.clanLeave().then(function () { UI.toast('Ты вышел из клана', 'info', 'i_lock'); afterClanChange(m); })
           .catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); });
       });
     });
     m.querySelector('#clanDelete').addEventListener('click', function () {
       UI.confirm('Удалить клан?', 'Клан исчезнет для всех участников.', 'Удалить').then(function (y) {
         if (!y) return;
-        API.clanDelete().then(function () { UI.toast('Клан удалён', 'info', 'i_skull'); refreshClans(m); })
+        API.clanDelete().then(function () { UI.toast('Клан удалён', 'info', 'i_skull'); afterClanChange(m); })
           .catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); });
       });
     });

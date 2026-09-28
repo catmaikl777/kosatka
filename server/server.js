@@ -561,7 +561,15 @@ function saveState(c, m) {
   c.acc.skin = norm(s.skin) || 'normal';
   c.acc.seasonScore = Math.max(0, num(s.eventSeasonScore, 0));
   c.acc.savedAt = Date.now();
-  if (s.clan && s.clan.id && !c.acc.clanId) c.acc.clanId = +s.clan.id;
+  /* Членство в клане — ТОЛЬКО серверная истина. Раньше здесь стояло
+     `if (s.clan && s.clan.id && !c.acc.clanId) c.acc.clanId = +s.clan.id;`
+     — клиентский сейв сам возвращал игроку клан после выхода/удаления,
+     из-за чего интерфейс вечно показывал «ты уже в клане», а выйти
+     было невозможно. Теперь в сейв попадает лишь серверная проекция. */
+  s.clan = c.acc.clanId && db.clans[c.acc.clanId]
+    ? { id: db.clans[c.acc.clanId].id, name: db.clans[c.acc.clanId].name,
+        role: roleIn(db.clans[c.acc.clanId], c.acc.id) }
+    : null;
   saveDb();
   send(c, { t: 'save:ok', rid: c.lastId, savedAt: c.acc.savedAt });
 }
@@ -696,11 +704,27 @@ function clanRoute(c, t, m, open) {
     const cl = c.acc.clanId && db.clans[c.acc.clanId];
     if (!cl) return err(c, t, 'ты не в клане');
     if (cl.owner !== c.acc.id) return err(c, t, 'удалить клан может только владелец');
-    for (const mid of cl.members) { const a = db.accounts[mid]; if (a) a.clanId = null; }
+    const members = cl.members.slice();
+    for (const mid of members) { const a = db.accounts[mid]; if (a) a.clanId = null; }
     delete db.clans[cl.id];
     delete db.clanByCode[cl.code];
     saveDb();
-    return send(c, { t: 'clan:delete:ok', rid: c.lastId });
+    /* Каждому бывшему участнику шлём clan:state: null — иначе у всех
+       остаётся клон клана в интерфейсе и в сейве, хотя клан уже удалён. */
+    for (const mid of members) pushClanState(mid, null);
+    return send(c, { t: 'clan:delete:ok', rid: c.lastId, clan: null });
+  }
+  if (t === 'clan:me') {
+    /* Запрос канонического состояния: клиент дёргает его после любой
+       мутации, чтобы вкладки не показывали старые данные. */
+    const cl = c.acc.clanId && db.clans[c.acc.clanId];
+    if (cl) for (const mid of cl.members) {
+      if (db.accounts[mid] && db.accounts[mid].clanId !== cl.id) {
+        db.accounts[mid].clanId = cl.id;      /* починка разъезда БД */
+        cl.members.push(mid);
+      }
+    }
+    return send(c, { t: 'clan:state', rid: c.lastId, clan: cl ? clanState(cl, roleIn(cl, c.acc.id)) : null });
   }
   if (t === 'clan:donate') {
     const cl = c.acc.clanId && db.clans[c.acc.clanId];
@@ -723,6 +747,12 @@ function pushClan(cl) {
     if (!a) continue;
     for (const c of clients) if (c.acc === a) send(c, { t: 'clan:state', clan: clanState(cl, roleIn(cl, a.id)) });
   }
+}
+/* Точечная рассылка clan:state одному аккаунту (в т.ч. clan: null при выходе/удалении). */
+function pushClanState(accId, cl) {
+  const a = db.accounts[accId];
+  if (!a) return;
+  for (const c of clients) if (c.acc === a) send(c, { t: 'clan:state', clan: cl });
 }
 
 /* ---------- PvP ---------- */

@@ -217,6 +217,37 @@ async function main() {
   const tooMuch = await A.send('clan:donate', { coins: 999999 }).catch(e => e);
   ok('пожертвование больше баланса отклонено', tooMuch instanceof Error, String(tooMuch));
 
+  /* регресс: членство клана не восстанавливается из клиентского сейва.
+     Раньше save() принимал state.clan.id и возвращал игроку клан после
+     выхода — интерфейс вечно показывал «ты уже в клане». */
+  const stLoad = await B.send('load', {});
+  const stale = JSON.parse(JSON.stringify(stLoad.state || {}));
+  stale.clan = { id: created.clan.id, name: created.clan.name, role: 'member' };
+  const leftB = await B.send('clan:leave', {});
+  ok('B вышел из клана', leftB.t === 'clan:leave:ok' && leftB.clan === null, JSON.stringify(leftB));
+  const saveStale = await B.send('save', { state: stale });
+  ok('save с устаревшим clan.id принят без ошибки', saveStale.t === 'save:ok', JSON.stringify(saveStale.t));
+  const meAfterSave = await B.send('clan:me', {});
+  ok('после выхода клан не вернулся из сейва клиента', meAfterSave.clan === null, JSON.stringify(meAfterSave.clan));
+  const meRejoin = await B.send('clan:join', { code: created.clan.code }).catch(e => e);
+  ok('после выхода можно вступить снова', meRejoin.t === 'clan:join:ok', JSON.stringify(meRejoin.t || meRejoin));
+  await B.send('clan:leave', {});
+  const meReal = await A.send('clan:me', {});
+  ok('clan:me возвращает канонический клан', meReal.clan && meReal.clan.id === created.clan.id && meReal.clan.role === 'owner', JSON.stringify(meReal.clan));
+  const afterDelete = A.waitFor('clan:state', 5000);
+  const del = await A.send('clan:delete', {});
+  ok('владелец удалил клан, в ответе clan:null', del.t === 'clan:delete:ok' && del.clan === null, JSON.stringify(del));
+  const delSt = await afterDelete;
+  ok('после удаления пришло clan:state с null', delSt.clan === null, JSON.stringify(delSt.clan));
+  const meGone = await A.send('clan:me', {});
+  ok('после удаления clan:me пуст', meGone.clan === null, JSON.stringify(meGone.clan));
+  /* пересоздаём клан: дальше идут тесты ивента, где обмен доступен
+     только внутри клана */
+  const again = await A.send('clan:create', { name: 'Глубь' + uniq.slice(-4) });
+  ok('клан можно пересоздать с тем же именем', again.t === 'clan:create:ok' && !!again.clan.code, JSON.stringify(again.t));
+  const donated = await A.send('clan:donate', { coins: 1000 });
+  ok('взнос во вновь созданный клан', donated.t === 'clan:donate:ok', JSON.stringify(donated.t));
+
   /* 7. ивент: обмен билетов на очки сезона */
   const ev = await A.send('event:info');
   ok('event:info отдаётSeason', ev.t === 'event:info' && ev.left > 0);

@@ -52,6 +52,10 @@ canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
   inset: 0;
   width: 100vw;
   height: 100vh;
+  /* 100vh на телефоне — это «большой» вьюпорт: блок уезжал под
+     адресную строку и поле выглядело обрезанным. dvh следует за
+     видимой областью, vh остаётся запасным вариантом для старых браузеров. */
+  height: 100dvh;
   z-index: 0;
   display: block;
   image-rendering: pixelated;
@@ -912,6 +916,54 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
 
 @media (max-height: 620px) {
   .menu { max-height: 38vh; }
+  .tap-hint { display: none; }
+}
+
+/* ---------- ТЕЛЕФОНЫ ----------
+   Базовый брейкпоинт был только 480px, поэтому на обычных смартфонах
+   (390-430px) интерфейс оставался «десктопного» размера: HUD занимал
+   92px, шрифты и кнопки меню были крупнее, чем нужно пальцу. Ниже —
+   компактный режим, который реально умещается в 360x640 и в 390x844. */
+@media (max-width: 560px), (pointer: coarse) and (max-width: 900px) {
+  :root { --hud-h: 74px; }
+  html, body { font-size: 12px; }
+
+  /* HUD компактнее */
+  .hud { padding: 4px 6px; gap: 4px; }
+  .pill { font-size: 7px; padding: 2px 4px; }
+
+  /* Меню: кнопки ниже и компактнее, сетка шире по числу колонок */
+  .menu {
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    max-height: 40vh;
+    padding: 6px;
+    gap: 5px;
+  }
+  .menu-btn { flex-direction: column; padding: 7px 5px; font-size: 8px; }
+  .menu-btn .px-icon { width: 18px; height: 18px; }
+
+  /* Панели и модалки не должны занимать весь экран */
+  .px-panel { padding: 8px; }
+  .px-modal-body { padding: 10px 8px; }
+  .px-modal { max-width: calc(100vw - 12px); }
+  .px-btn { padding: 9px 8px; font-size: 9px; }
+  .px-btn-small { padding: 7px 6px; font-size: 8px; }
+
+  /* Таблицы лидербордов/кланов прокручиваются, а не растягивают экран */
+  .px-table { font-size: 9px; }
+  .px-table td, .px-table th { padding: 4px 3px; }
+
+  /* Арена боя: не вылезает за экран по ширине */
+  .battle-arena { max-width: 100%; }
+  .result-box { padding: 8px; }
+  .arena-time { font-size: 16px; }
+}
+
+/* Телефон в альбомной ориентации: места по вертикали мало */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root { --hud-h: 58px; }
+  .menu { max-height: 46vh; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+  .menu-btn { padding: 5px 4px; font-size: 7px; }
   .tap-hint { display: none; }
 }
 

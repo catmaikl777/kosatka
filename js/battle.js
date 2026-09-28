@@ -11,6 +11,7 @@
   var pendingClicks = 0, sendT = 0, lastTs = 0, lastMyClick = 0;
   var myClicks = 0;   /* клики в текущем бою — по ним считаются билеты ивента */
   var serverDraw = false;  /* ничья по мнению сервера */
+  var settled = false;     /* бой уже рассчитан и награда выдана — повторно не платим */
   var raidTeam = null, foeTeam = null, teamScore = 0, foeTeamScore = 0;
   var mySlot = 0;
   var splashes = [];
@@ -140,11 +141,19 @@
     if (!arena) return;
     var px = 3;
     var host = arena.parentElement || modal;
-    var w = Math.max(180, Math.floor(((host && host.clientWidth) || 320) / px));
-    var h = Math.max(80, Math.floor(200 / px));
+    var bw = (host && host.clientWidth) || 320;
+    var w = Math.max(120, Math.floor(bw / px));
+    /* Арена рисуется в пропорциях 3:2. Раньше ширину расширяли
+       Math.max(180, …), а высоту держали 66 — на узком экране канвас
+       растягивался по горизонтали и ора в нём выглядела сплющенной.
+       Теперь минимум расширяется с сохранением пропорций 3:2. */
+    var h = Math.round(w * 2 / 3);
+    if (h < 40) { h = 40; w = Math.round(h * 3 / 2); }
     arena.width = w; arena.height = h;
-    arena.style.width = (w * px) + 'px';
-    arena.style.height = (h * px) + 'px';
+    /* ширину ограничиваем контейнером, чтобы арена не вылезала за экран */
+    var cssW = Math.min(w * px, bw);
+    arena.style.width = cssW + 'px';
+    arena.style.height = Math.round(cssW * 2 / 3) + 'px';
     actx.imageSmoothingEnabled = false;
   }
 
@@ -202,14 +211,28 @@
     splashes.push({ x: x, y: y, c: c, life: 300, max: 300 });
   }
 
+  /* Длительность по протоколу приходит В СЕКУНДАХ (так шлёт сервер:
+     server.js отдаёт PVP_MS/1000 и RAID_MS/1000), а счётчик обратного
+     отсчёта уменьшается на dt кадра, то есть в миллисекундах. Раньше
+     30 секунд попадали в счётчик как 30 мс — бой умирал за 4-6 кадров,
+     то есть выглядел как мгновенный. Здесь единый перевод в мс. */
+  function toMs(v, fallbackSec) {
+    var n = Number(v);
+    if (!(n > 0)) n = Number(fallbackSec) || 30;
+    return n * 1000;
+  }
+
   function startMatch(duration, foeName, foeSkin, kind) {
     myScore = 0; foeScore = 0; teamScore = 0; foeTeamScore = 0;
     myClicks = 0;
     serverDraw = false;
-    timeLeft = duration;
+    timeLeft = toMs(duration, kind === 'raid' ? 60 : 30);
     pendingClicks = 0;
     lastMyClick = 0;
+    lastTickSec = -1;
     splashes = [];
+    settled = false;
+    myCpsWin = []; foeCpsWin = [];   /* без сброса «к/с» считались по всем боям подряд */
     buildArena(foeName, foeSkin, skinPal(), duration, kind);
     root.CLICK.battleMode = true;
     root.CLICK.battleCallback = battleClick;
@@ -318,6 +341,7 @@
   function finish() {
     if (!running) return;
     running = false;
+    settled = true;        /* награда выдаётся ровно один раз за бой */
     /* досылаем накопленные клики, чтобы последние не потерялись */
     if (!botMode && mode) flushClicks(true);
     root.CLICK.battleMode = false;
@@ -383,17 +407,28 @@
       '<div class="result-reward">Награда: ' + ST.fmt(reward) + ' косаток</div>' +
       '<div class="result-tickets">Билеты ивента: +' + tickets +
       ' <span class="dim">(' + myClicks + ' кликов / ' + D.EVENT.pvpClickDiv + ')</span></div></div>';
+    /* Арену закрываем сразу — бой окончен, а updateScore/drawArena больше
+       не нужны. Раньше окно результата не запоминалось в modal, поэтому
+       closeModal() через 2.6с закрывал арену, а «ПОБЕДА» оставалось висеть. */
+    if (modal) { UI.closeEl(modal); modal = null; }
+    arena = null; actx = null;
+
     var m = UI.modalShell(win ? 'ПОБЕДА' : draw ? 'НИЧЬЯ' : 'ПОРАЖЕНИЕ', html,
       { footer: '<button class="px-btn px-btn-primary" data-close="1">В меню</button>' });
+    modal = m;
     if (root.QUESTS) root.QUESTS.check();
-    var self = this;
-    setTimeout(function () { closeModal(); }, 2600);
+    setTimeout(function () { if (modal === m) closeModal(); }, 2600);
   }
 
   function closeModal() {
     if (modal) { UI.closeEl(modal); modal = null; }
     arena = null; actx = null; running = false;
     root.CLICK.battleMode = false;
+    root.CLICK.battleCallback = null;
+    /* mode/botMode ОБЯЗАТЕЛЬНО сбрасываем: иначе через 30 секунд придёт
+       серверный pvp:end, его обработчик увидит mode === 'pvp' и начислит
+       награду повторно — бой уже рассчитан локально в finish(). */
+    mode = ''; botMode = false;
   }
 
   /* ================= РЕЙДЫ ================= */
@@ -500,15 +535,21 @@
     });
     API.on('pvp:tick', function (m) {
       if (mode !== 'pvp' || !running) return;
-      myScore = m.you; foeScore = m.foe;
-      timeLeft = m.time;
+      if (m.you != null) { myScore = m.you; foeScore = m.foe; }
+      /* сервер шлёт оставшееся время в секундах; без проверки undefined
+         счётчик ушёл бы в NaN и бой не закончился бы никогда */
+      if (m.time != null) timeLeft = toMs(m.time, 30);
     });
     API.on('pvp:end', function (m) {
       if (mode !== 'pvp') return;
       if (m.you != null) { myScore = m.you; foeScore = m.foe; }
-      if (running) finish();
-      else {
+      if (running) { finish(); return; }
+      /* бой уже рассчитан локально — повторно платить нельзя, иначе игрок
+         забирает награду дважды: от своего таймера и от серверного итога */
+      if (settled) return;
+      {
         /* бой закончился, пока окно лобби ещё было открыто */
+        settled = true;
         var isDraw = !!m.draw;
         ST.addCoins(Math.floor((m.win ? 2000 : isDraw ? 900 : 400) * ST.state.level), true);
         if (m.win) { ST.state.stats.pvpWins++; ST.bump('pvpWins'); }
@@ -537,10 +578,12 @@
     });
     API.on('raid:tick', function (m) {
       if (mode !== 'raid' || !running) return;
-      teamScore = m.you; foeTeamScore = m.foe; timeLeft = m.time;
+      if (m.you != null) { teamScore = m.you; foeTeamScore = m.foe; }
+      if (m.time != null) timeLeft = toMs(m.time, 60);
     });
     API.on('raid:end', function (m) {
       if (mode !== 'raid') return;
+      if (settled) return;
       if (m.you != null) { teamScore = m.you; foeTeamScore = m.foe; }
       serverDraw = !!m.draw;
       if (running) finish();

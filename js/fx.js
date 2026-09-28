@@ -165,11 +165,26 @@
     raf = requestAnimationFrame(frame);
   }
 
+  /* Минимальный размер буфера в логических пикселях. Раньше буфер
+     принудично расширялся до 200x240 Math.max(), из-за чего его
+     пропорции переставали совпадать с пропорциями блока на телефоне
+     (360x640 -> буфер 200x240 = 0.83 против 0.56 у экрана), и CSS
+     растягивал картинку: кот получался «толстым». Теперь минимум
+     расширяется с сохранением пропорций. */
+  var MIN_W = 160, MIN_H = 200;
+
   function resize() {
     PX = ST.state.settings.pixelScale || 3;
     PX = Math.max(2, Math.min(6, PX));
-    var w = Math.max(200, Math.ceil(window.innerWidth / PX));
-    var h = Math.max(240, Math.ceil(window.innerHeight / PX));
+    /* размеры берём у самого блока, а не у window: так буфер точно
+       совпадает с тем, во что canvas реально растягивается */
+    var box = cv.parentElement || cv;
+    var bw = box.clientWidth || window.innerWidth || 320;
+    var bh = box.clientHeight || window.innerHeight || 480;
+    var w = Math.ceil(bw / PX);
+    var h = Math.ceil(bh / PX);
+    if (w < MIN_W) { w = MIN_W; h = Math.round(MIN_W * bh / bw); }
+    if (h < MIN_H) { h = MIN_H; w = Math.round(MIN_H * bw / bh); }
     W = w; H = h;
     cv.width = w; cv.height = h;
     cv.style.width = '100%';

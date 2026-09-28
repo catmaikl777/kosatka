@@ -730,6 +730,71 @@ ok('рейд: есть кнопка «РЕЙД С БОТАМИ»', !!document.ge
 BATTLE.close();
 ok('PvP/рейд не дали ошибок', errors.length === errB, errors.slice(errB).join(' | '));
 
+/* ================= 12a. регресс: поле не растянуто =============
+   Буфер canvas расширялся Math.max(200,·)×Math.max(240,·), из-за чего
+   его пропорции переставали совпадать с пропорциями блока, и CSS
+   растягивал картинку — кот выглядел «толстым». Буфер обязан
+   сохранять пропорции блока. */
+const sceneEl = document.getElementById('scene');
+ok('канвас поля найден', !!sceneEl, String(!!sceneEl));
+if (sceneEl) {
+  const boxAR = sceneEl.clientWidth / sceneEl.clientHeight;
+  const bufAR = sceneEl.width / sceneEl.height;
+  ok('пропорции буфера поля совпадают с блоком (нет растяжения)',
+    Math.abs(bufAR - boxAR) < 0.02,
+    `буфер ${sceneEl.width}x${sceneEl.height} AR=${bufAR.toFixed(3)}, блок AR=${boxAR.toFixed(3)}`);
+  ok('буфер поля не меньше минимума', sceneEl.width >= 100 && sceneEl.height >= 100,
+    `${sceneEl.width}x${sceneEl.height}`);
+}
+
+/* Арена боя рисуется в пропорциях 3:2 и не должна вылезать за контейнер */
+BATTLE.openPvP();
+document.getElementById('pvBot').click();
+const arEl = document.getElementById('arCv');   /* прямой id: mini-DOM ненадёжен на descendant-селекторах */
+ok('арена боя отрисована', !!arEl, String(!!arEl));
+if (arEl) {
+  const aAR = arEl.width / arEl.height;
+  ok('арена сохраняет пропорции 3:2', Math.abs(aAR - 1.5) < 0.05, `AR=${aAR.toFixed(3)}`);
+  const hostW = (arEl.parentElement && arEl.parentElement.clientWidth) || 0;
+  ok('арена не шире контейнера',
+    !arEl.style.width || !hostW || parseInt(arEl.style.width, 10) <= hostW,
+    arEl.style.width);
+}
+BATTLE.close();
+
+/* ================= 12b. регресс: бой не должен заканчиваться мгновенно ==========
+   Раньше сервер отдавал длительность в секундах (30), а счётчик обратного
+   отсчёта уменьшался на dt кадра в миллисекундах — 30 секунд превращались
+   в 30 мс и бой умирал за 4-6 кадров. Гоняем кадры с настоящим ходом
+   времени и проверяем, что бой жив и таймер тикает. */
+const errT = errors.length;
+BATTLE.openPvP();
+document.getElementById('pvBot').click();
+ok('PvP: арена открылась после старта боя с ботом', !!document.getElementById('arTime'),
+  String(!!document.getElementById('arTime')));
+let vt = 0;
+const driveFrames = (n, stepMs) => {
+  for (let i = 0; i < n; i++) {
+    vt += stepMs;
+    const q = rafQueue.splice(0, rafQueue.length);
+    for (const fn of q) { try { fn(vt); } catch (e) { errors.push('raf: ' + e.message); } }
+  }
+};
+driveFrames(20, 100);           /* 2 секунды игрового времени */
+const tAfter2s = document.getElementById('arTime');
+ok('через 2 с бой ещё идёт (таймер не обнулился)', !!tAfter2s && Number(tAfter2s.textContent) >= 27,
+  String(tAfter2s && tAfter2s.textContent));
+ok('через 2 с бой не превратился в окно результата', !document.querySelector('.result-box'),
+  String(!!document.querySelector('.result-box')));
+/* Гоняем кадры до появления окна результата и считаем, сколько кадров
+   (= секунд) занял бой. Сломанный вариант завершался за 2-3 кадра. */
+let frames = 20;   /* 20 кадров уже отрисовано выше */
+while (frames < 400 && !document.querySelector('.result-box')) { driveFrames(1, 100); frames++; }
+ok('бой длится полные 30 с, а не 30 мс', frames >= 298 && frames <= 305, frames + ' кадров');
+ok('после боя клики больше не засчитываются', !CLICK.battleMode, String(CLICK.battleMode));
+BATTLE.close();
+ok('таймер боя не дал ошибок', errors.length === errT, errors.slice(errT).join(' | '));
+
 /* ================= 13. соцсети, лидерборд, ивент, настройки ================= */
 const errS = errors.length;
 for (const [name, fn] of [

@@ -126,14 +126,14 @@
       } else {
         html += '<div class="ev-top">' +
           '<div class="ev-cell"><span>До конца сезона</span><b>' + ST.fmtTime(info.left || 0) + '</b></div>' +
-          '<div class="ev-cell"><span>Ваши билеты</span><b>' + (ST.state.eventTickets || 0) + '</b></div>' +
-          '<div class="ev-cell"><span>Очки сезона</span><b>' + ST.fmt(info.topScore || 0) + '</b></div>' +
+          '<div class="ev-cell"><span>Ваши билеты</span><b id="evTickets">' + (ST.state.eventTickets || 0) + '</b></div>' +
+          '<div class="ev-cell"><span>Очки сезона</span><b id="evScore">' + ST.fmt(info.topScore || 0) + '</b></div>' +
           '</div>';
       }
       html += '<p class="dialog-text">Билеты обмениваются в клане на очки сезона. Чем больше очков у клана, тем выше его место в наградах.</p>' +
         '<div class="clan-evt">' +
         '<button class="px-btn px-btn-small px-btn-primary" id="evExchange">🎫 ОБМЕНЯТЬ 10 БИЛЕТОВ → 100 ОЧКОВ</button>' +
-        (ST.state.clan ? '' : '<span class="dim">нужен клан</span>') +
+        (ST.state.clan && ST.state.clan.id ? '' : '<span class="dim">нужен клан</span>') +
         '</div>';
       html += '<div class="ev-rewards"><h4>Топ игроков</h4>' +
         '<div class="ev-line ev-1">🥇 1 место: ' + ST.fmt(D.EVENT.playerRewards[0]) + '</div>' +
@@ -150,16 +150,35 @@
       var m = UI.modalShell('СЕЗОННЫЙ ИВЕНТ', html);
       root.SHOP.paintIcons(m);
       var ex = m.querySelector('#evExchange');
+      var tkCell = m.querySelector('#evTickets'), scCell = m.querySelector('#evScore');
+      function repaintEv() {
+        if (tkCell) tkCell.textContent = String(ST.state.eventTickets || 0);
+        if (scCell) scCell.textContent = ST.fmt(ST.state.eventSeasonScore || 0);
+        if (ex) ex.disabled = (ST.state.eventTickets || 0) < 10;
+      }
       if (ex) ex.addEventListener('click', function () {
+        if ((ST.state.eventTickets || 0) < 10) return;
+        ex.disabled = true;
         API.send('event:exchange', { n: 10 }, 8000).then(function (r) {
           ST.state.eventTickets = r.tickets || 0;
           ST.state.eventSeasonScore = r.seasonScore || 0;
           ST.save();
           root.SND.play('levelUp');
           UI.banner('+' + r.points + ' ОЧКОВ СЕЗОНА', 'banner-good', 1400);
-          ex.disabled = true;
-        }).catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); });
+          /* сразу перерисовываем билеты/очки и топ — раньше окно оставалось
+             со старыми числами до переоткрытия вкладки */
+          repaintEv();
+          API.leaderboard('event').then(function (rows) {
+            var box = m.querySelector('#evLb');
+            if (box) box.innerHTML = rows.length ? lbTable(rows, 'season') : '<div class="dim">пока пусто</div>';
+          });
+          API.clanList().then(function (rows) {
+            var box = m.querySelector('#evClanLb');
+            if (box) box.innerHTML = rows.length ? clanTable(rows) : '<div class="dim">кланов пока нет</div>';
+          });
+        }).catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); ex.disabled = false; });
       });
+      repaintEv();
       if (!info.offline) {
         API.leaderboard('event').then(function (rows) {
           var box = m.querySelector('#evLb');

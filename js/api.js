@@ -41,6 +41,20 @@
   function on(ev, fn) {
     (handlers[ev] = handlers[ev] || []).push(fn);
   }
+
+  /* Применяет каноническое состояние клана в кэш, сейв и подписчиков. */
+  function applyClan(cl) {
+    var same = (!cl && !clanState) ||
+      (cl && clanState && cl.id === clanState.id && cl.name === clanState.name && cl.role === clanState.role);
+    clanState = cl || null;
+    if (root.ST) {
+      root.ST.state.clan.id = clanState ? clanState.id : null;
+      root.ST.state.clan.name = clanState ? clanState.name : null;
+      root.ST.state.clan.role = clanState ? clanState.role : null;
+      root.ST.save();
+    }
+    if (!same) emit('clan', clanState);
+  }
   function setStatus(s, err) {
     status = s;
     if (err) lastError = err;
@@ -87,15 +101,12 @@
         if (root.ST) { root.ST.state.account.token = null; root.ST.save(); }
         emit('authError', msg.msg);
       }
-      if (msg.t === 'clan:state') {
-        clanState = msg.clan;
-        if (root.ST) {
-          root.ST.state.clan.id = clanState ? clanState.id : null;
-          root.ST.state.clan.name = clanState ? clanState.name : null;
-          root.ST.state.clan.role = clanState ? clanState.role : null;
-          root.ST.save();
-        }
-        emit('clan', clanState);
+      /* Единая точка применения кланового состояния. Раньше состояние
+         читалось только из отдельного push 'clan:state', поэтому ответы
+         вида clan:leave:ok / clan:delete:ok / clan:create:ok игнорировались
+         и вкладка «Клан» продолжала показывать удалённый/старый клан. */
+      if (msg.t === 'clan:state' || (Object.prototype.hasOwnProperty.call(msg, 'clan') && /^clan:/.test(msg.t || ''))) {
+        applyClan(msg.clan || null);
       }
       emit(msg.t, msg);
       emit('*', msg);
@@ -175,6 +186,9 @@
   function clanLeave() { return send('clan:leave', {}, 8000); }
   function clanDelete() { return send('clan:delete', {}, 8000); }
   function clanDonate(coins) { return send('clan:donate', { coins: coins }, 8000); }
+  /* Канонический состояние «какого клана я сейчас в»: сервер ответит
+     clan:state (с rid), он же обновит кэш через applyClan. */
+  function clanMe() { return send('clan:me', {}, 6000); }
   /* Бонус клана присылает сервер уже с учётом казны
      (server.js clanState → clanBonus), поэтому берём его как есть. */
   function clanBonus() {
@@ -211,6 +225,7 @@
     leaderboard: leaderboard,
     clanList: clanList, clanCreate: clanCreate, clanJoin: clanJoin,
     clanLeave: clanLeave, clanDelete: clanDelete, clanDonate: clanDonate,
+    clanMe: clanMe, applyClan: applyClan,
     clanBonus: clanBonus,
     pvpLobbies: pvpLobbies, pvpCreate: pvpCreate, pvpJoin: pvpJoin,
     pvpJoinCode: pvpJoinCode, pvpLeave: pvpLeave, pvpReady: pvpReady, pvpClicks: pvpClicks,
