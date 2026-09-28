@@ -124,6 +124,22 @@ if (existsSync(swPath)) {
   );
   writeFileSync(swPath, replaced);
   ok(`sw.js: precache пересобран (${list.length} файлов)`, replaced !== sw);
+  /* штамп версии: служба кэширует shell под именем VERSION-…, поэтому
+     каждая сборка должна менять VERSION — иначе браузеры годами получают
+     старый JS из кэша (cache-first в sw.js) */
+  const hash = (() => {
+    try {
+      return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).toString().trim();
+    } catch (e) { return 'b' + Date.now().toString(36); }
+  })();
+  const stamped = replaced.replace(/const VERSION = '[^']*';/,
+    `const VERSION = 'kosatka-v3.2.0-${hash}';`);
+  if (stamped !== replaced) {
+    writeFileSync(swPath, stamped);
+    ok(`sw.js: VERSION обновлена (kosatka-v3.2.0-${hash})`, true);
+  } else {
+    ok('sw.js: не нашлась строка VERSION для штампа', false);
+  }
   /* сверяем, что в precache нет несуществующих файлов */
   const miss = list.filter((f) => f !== './' && !existsSync(path.join(OUT, f.slice(2))));
   ok('все файлы precache существуют', miss.length === 0, miss.join(', '));

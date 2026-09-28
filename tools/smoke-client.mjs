@@ -348,6 +348,22 @@ ok('boot() отработал без исключений', errors.length === 0,
   ok('css задаёт image-rendering: auto', /image-rendering\s*:\s*auto/.test(css));
 }
 
+/* ---------- регресс: сборка обязана штамповать версию service worker ----------
+   sw.js отдаёт статику cache-first, поэтому оболочка живёт под именем
+   kosatka-<VERSION>-shell. Пока VERSION меняется вручную, пользователи
+   получают старый JS неделями: правки есть в репозитории, а в игре — нет.
+   Сборка (tools/prepare-pages.mjs) обязана подставлять версию сама. */
+{
+  const prep = fs.readFileSync(new URL('../tools/prepare-pages.mjs', import.meta.url), 'utf8');
+  ok('сборка штампует VERSION в sw.js',
+    /replace\(\s*\/const VERSION = '\[\^'\]\*'\;\//.test(prep),
+    'в prepare-pages.mjs нет замены const VERSION');
+  const sw = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  ok('в sw.js версия объявлена константой с одинарными кавычками',
+    /^const VERSION = '[^']*';$/m.test(sw),
+    'строка const VERSION = \'...\'; не найдена — шаблон не заменится');
+}
+
 /* ---- HUD: гостевой кнопки нет, все валюты на главном экране ---- */
 /* шим не умеет descendant-селекторы, поэтому ищем через обход родителей */
 const inParentClass = (node, cls) => {
