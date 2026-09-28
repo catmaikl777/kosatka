@@ -239,7 +239,11 @@
   function buySkin(id) {
     var s = skin(id);
     if (!s || state.skinsOwned.indexOf(id) >= 0) return false;
-    if (s.box || s.event || s.raid || s.secret) return false;
+    /* скин может иметь и цену, и альтернативный источник (бокс/ивент/рейд).
+       Раньше такая комбинация ломала покупку: цена показывалась в магазине,
+       но buySkin отказывал из-за box/event/raid. Покупаем по цене, а из
+       бокса/ивента/рейда скин по-прежнему можно получить бесплатно. */
+    if (!s.cost || s.cost <= 0) return false;
     if (state.coins < s.cost) return false;
     state.coins -= s.cost;
     state.skinsOwned.push(id);

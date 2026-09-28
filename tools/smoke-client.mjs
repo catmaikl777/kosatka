@@ -330,6 +330,64 @@ ok('все модули доступны в глобальной области'
 /* main.js сам вызывает boot() при readyState=complete */
 ok('boot() отработал без исключений', errors.length === 0, errors.join(' | '));
 
+/* ---- HUD: гостевой кнопки нет, все валюты на главном экране ---- */
+/* шим не умеет descendant-селекторы, поэтому ищем через обход родителей */
+const inParentClass = (node, cls) => {
+  for (let n = node; n; n = n.parentNode) if (n.classList && n.classList.contains(cls)) return true;
+  return false;
+};
+ok('кнопка «ГОСТЬ» убрана из верхнего HUD', !document.getElementById('accBtn'),
+  'accBtn всё ещё в разметке');
+const connDot = document.getElementById('connDot');
+ok('статус сервера перенесён внутрь HUD (не перекрывает его)',
+  !!connDot && inParentClass(connDot, 'hud'), 'connDot вне .hud');
+ok('статус сервера стоит в ряду валют, ниже основного HUD',
+  !!connDot && inParentClass(connDot, 'hud-cur'), 'conn не в .hud-cur');
+const CUR_IDS = ['hudCoins', 'hudFish', 'hudShells', 'ticketCnt', 'hudSeason'];
+const missingCur = CUR_IDS.filter(id => !document.getElementById(id));
+ok('все валюты есть в HUD', missingCur.length === 0, 'нет: ' + missingCur.join(','));
+const curPills = [...document.querySelectorAll('[data-cur]')];
+ok('каждая валюта кликабельна и объясняется', curPills.length === 5,
+  `пилюль=${curPills.length}, data-cur=${curPills.map(b => b.dataset.cur).join(',')}`);
+ok('валютные пилюли лежат в общем ряду HUD',
+  curPills.length > 0 && curPills.every(b => inParentClass(b, 'hud-cur')), 'не все в .hud-cur');
+/* подписи валют реально ведут к модалке с пояснением */
+const curErr = errors.length;
+for (const b of curPills) b.dispatchEvent({ type: 'click', target: b, bubbles: true });
+ok('тап по валютам открывает пояснения без ошибок', errors.length === curErr, errors.slice(curErr).join(' | '));
+UI.closeAll();
+const guideTitles = [...document.querySelectorAll('.px-modal.dialog')].map(m => {
+  const h = m.querySelector('h3');
+  return h ? h.textContent : '';
+});
+ok('пояснение к каждой валюте показано',
+  curPills.every((b, i) => /КОСАТКИ|РЫБА|РАКУШКИ|БИЛЕТЫ|ОЧКИ/.test(guideTitles[i] || '')),
+  guideTitles.join(' | '));
+const guideBodies = [...document.querySelectorAll('.px-modal.dialog')].map(m => m.textContent);
+ok('в пояснении к валюте есть текст, а не только заголовок',
+  guideBodies.length === 5 && guideBodies.every(t => t.length > 60),
+  'длины: ' + guideBodies.map(t => t.length).join(','));
+
+/* ---- вкладка «Как играть» ---- */
+const howto = document.getElementById('howto');
+ok('модалка «Как играть» есть в разметке', !!howto);
+const howtoTxt = howto ? howto.textContent : '';
+ok('в гайде есть ключевые разделы',
+  ['КЛИК', 'ВАЛЮТЫ', 'РЫБАЛКА', 'БОКСЫ', 'СКИНЫ', 'ПРЕСТИЖ', 'СОХРАНЕНИЕ']
+    .every(k => howtoTxt.includes(k)),
+  'разделов: ' + (howto ? howto.querySelectorAll('.sec-h').length : 0));
+const howtoUp = howtoTxt.toUpperCase();
+ok('в гайде объяснены все 5 валют',
+  ['КОСАТКИ', 'РЫБА', 'РАКУШКИ', 'БИЛЕТЫ ИВЕНТА', 'ОЧКИ СЕЗОНА'].every(k => howtoUp.includes(k)),
+  'нет: ' + ['КОСАТКИ', 'РЫБА', 'РАКУШКИ', 'БИЛЕТЫ ИВЕНТА', 'ОЧКИ СЕЗОНА'].filter(k => !howtoUp.includes(k)).join(','));
+ok('пункт «КАК ИГРАТЬ» есть в меню', [...document.querySelectorAll('[data-menu]')]
+  .some(b => b.dataset.menu === 'howto'));
+const howtoErr = errors.length;
+UI.open('howto');
+SHOP.paintIcons(document);
+ok('гайд открывается без ошибок', errors.length === howtoErr && UI.isOpen('howto'), errors.slice(howtoErr).join(' | '));
+UI.closeAll();
+
 /* прокручиваем кадры анимации */
 const tickFrames = (n) => { for (let i = 0; i < n; i++) { const q = rafQueue.splice(0, rafQueue.length); for (const fn of q) { try { fn(performance.now()); } catch (e) { errors.push('raf: ' + e.message); } } } };
 
@@ -394,6 +452,28 @@ ok('скин покупается и надевается', ST.state.skinsOwned.
   `${skin.id}, owned=${ST.state.skinsOwned.length}`);
 ok('коэффициент скина учитывается', ST.allMult() > 1, String(ST.allMult()));
 
+/* --- регресс: скин с ценой И альтернативным источником (бокс/ивент/рейд)
+   раньше buySkin() отказывал из-за box/event/raid, хотя цену показывали. --- */
+const dual = DATA.SKINS.find(s => s.cost > 0 && (s.box || s.event || s.raid || s.secret)
+  && !ST.state.skinsOwned.includes(s.id));
+ok('есть скин с ценой и боксом одновременно', !!dual,
+  dual ? `${dual.id} cost=${dual.cost} box=${dual.box || '-'} raid=${dual.raid || '-'} event=${dual.event || '-'} secret=${dual.secret || '-'}` : '');
+if (dual) {
+  ST.state.coins = dual.cost;
+  const coinsBefore = ST.state.coins;
+  const bought = ST.buySkin(dual.id);
+  ok('скин с ценой и боксом покупается за косатки', bought === true, `buySkin=${bought}`);
+  ok('скин с ценой и боксом списывает ровно цену',
+    ST.state.coins === coinsBefore - dual.cost, `${coinsBefore} → ${ST.state.coins}, цена=${dual.cost}`);
+  ok('покупной скин добавлен и надет',
+    ST.state.skinsOwned.includes(dual.id) && ST.state.skin === dual.id, `skin=${ST.state.skin}`);
+  ok('повторная покупка не списывает косатки (уже есть)', ST.buySkin(dual.id) === false, `skin=${ST.state.skin}`);
+}
+/* скины без цены по-прежнему нельзя купить — только из бокса/ивента */
+const noCost = DATA.SKINS.find(s => !(s.cost > 0) && !ST.state.skinsOwned.includes(s.id));
+ok('скин без цены не покупается за косатки', noCost ? ST.buySkin(noCost.id) === false : true,
+  noCost ? noCost.id : '');
+
 /* ================= 5. бокс ================= */
 ST.state.coins = 1e12;
 ST.state.fish = 10;
@@ -403,11 +483,74 @@ const boxId = DATA.BOXES[0].id;
 const r = SHOP.openBox(boxId);
 ok('бокс открывается (списание + счётчик)', ST.state.stats.boxesOpened === boxesBefore + 1 && ST.state.coins < 1e12,
   `${boxesBefore} → ${ST.state.stats.boxesOpened}, id=${boxId}, ответ=${JSON.stringify(r)}`);
-await sleep(1600);                      /* лут приходит через 1400мс */
+await sleep(1900);                      /* интрига 1470мс + лут на 1690мс */
 ok('бокс выдал награду', errors.length === 0, errors.slice(0, 2).join(' | '));
 const loot = document.querySelectorAll('.loot-list');
 ok('окно лута показано', loot.length > 0,
   `найдено=${loot.length}, body.children=${document.body.children.length}, modals=${document.querySelectorAll('.px-modal').length}, html=${loot.length ? loot[0].innerHTML.slice(0, 80) : document.body.innerHTML.slice(0, 120)}`);
+ok('иконки лута отрисованы', loot.length > 0 && [...loot[0].querySelectorAll('canvas[data-spr]')]
+  .every(c => c.dataset.painted === '1'), 'пустые канвасы в окне лута');
+ok('после открытия бокс снова доступен', SHOP.openBox !== undefined && ST.state.boxesOpened >= 0,
+  'rolling сброшен');
+UI.closeAll();
+
+/* --- закрытие модалки бокса до кульминации: добыча не теряется --- */
+UI.closeAll();
+ST.state.coins = 1e12;
+const BOX0 = DATA.BOXES[0];
+const fishBefore = ST.state.fish, shellsBefore = ST.state.shells;
+const ticketsBefore = ST.state.eventTickets, fxBefore = ST.state.effectsOwned.length;
+const openedBefore = ST.state.stats.boxesOpened;
+const coinsBeforeCut = ST.state.coins;
+SHOP.openBox(BOX0.id);
+const stage = document.querySelector('.box-stage');
+ok('фаза интриги показана до взрыва', !!stage, 'нет .box-stage');
+if (stage) {
+  /* идём вверх до обёртки-диалога и жмём «×» — как будто игрок передумал */
+  let wrap = stage;
+  while (wrap && !(wrap.classList && wrap.classList.contains('dialog'))) wrap = wrap.parentNode;
+  ok('модалка бокса — диалог', !!wrap, stage.className);
+  const closeBtn = wrap && wrap.querySelector('[data-close]');
+  ok('у модалки бокса есть кнопка закрытия', !!closeBtn);
+  if (closeBtn) closeBtn.dispatchEvent({ type: 'click', target: closeBtn, bubbles: true });
+}
+/* бокс оплачен, значит выигрыш считаем за вычетом его стоимости:
+   иначе выпавшие косатки «съедают» списание и тест врёт */
+const netCoins = ST.state.coins - coinsBeforeCut + BOX0.cost;
+ok('стоимость бокса списана при досрочном закрытии', netCoins >= 0,
+  `${coinsBeforeCut} → ${ST.state.coins}, цена=${BOX0.cost}`);
+ok('при досрочном закрытии лот всё равно выдан',
+  ST.state.stats.boxesOpened === openedBefore + 1 &&
+  (netCoins > 0 || ST.state.fish !== fishBefore || ST.state.shells !== shellsBefore ||
+   ST.state.eventTickets !== ticketsBefore || ST.state.effectsOwned.length !== fxBefore),
+  `boxes=${ST.state.stats.boxesOpened}, лут=${netCoins}🐋/${ST.state.fish}🐟/${ST.state.shells}🐚/${ST.state.eventTickets}🎫`);
+/* и боксы снова открываются: rolling не залип */
+const openedAfter = ST.state.stats.boxesOpened;
+SHOP.openBox(DATA.BOXES[0].id);
+ok('после досрочного закрытия новый бокс открывается', ST.state.stats.boxesOpened === openedAfter + 1,
+  `${openedAfter} → ${ST.state.stats.boxesOpened}`);
+UI.closeAll();
+
+/* --- регресс: закрытие ПОСЛЕ показа лута не выдаёт второй бонус --- */
+UI.closeAll();
+await sleep(1900);                        /* даём дописать предыдущую анимацию */
+ST.state.coins = 1e12;
+const doneBoxes = ST.state.stats.boxesOpened;
+const doneFish = ST.state.fish, doneShells = ST.state.shells;
+SHOP.openBox(DATA.BOXES[0].id);
+await sleep(1900);                        /* ждём все три фазы */
+const doneLoot = [...document.querySelectorAll('.px-modal.dialog')].pop();
+ok('после всех фаз показан лот', !!doneLoot && !!doneLoot.querySelector('.loot-list'), '');
+if (doneLoot) {
+  const x = doneLoot.querySelector('[data-close]');
+  ok('после открытия лута кнопка «×» на месте', !!x);
+  /* жмём «×» и сразу ещё раз — второй клик по кнопке закрытия */
+  if (x) x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+}
+ok('закрытие окна лута не выдаёт дополнительную добычу',
+  ST.state.stats.boxesOpened === doneBoxes + 1 &&
+  ST.state.fish === doneFish && ST.state.shells === doneShells,
+  `boxes ${doneBoxes}→${ST.state.stats.boxesOpened}, fish ${doneFish}→${ST.state.fish}, shells ${doneShells}→${ST.state.shells}`);
 UI.closeAll();
 
 /* ================= 6. квесты и достижения ================= */

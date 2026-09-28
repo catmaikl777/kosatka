@@ -100,12 +100,16 @@
       var eq = ST.state.skin === s.id;
       var locked = !owned && !s.cost;
       var label = owned ? (eq ? 'НАДЕТ' : 'НАДЕТЬ') : locked ? lockLabel(s) : ST.fmt(s.cost);
+      /* скин с ценой И альтернативным источником: показываем оба пути */
+      var alt = (!owned && s.cost && (s.box || s.event || s.raid || s.secret))
+        ? '<div class="skin-alt">или ' + lockLabel(s) + '</div>' : '';
       html += '<div class="px-card skin-card' + (eq ? ' equipped' : '') + (locked ? ' locked' : '') + '">' +
         '<div class="skin-art">' + SPRHTML(s.art || 'orca', 3) + '</div>' +
         '<div class="skin-meta">' +
         '<div class="skin-name">' + s.name + ' ' + UI.rarityBadge(s.rar) + '</div>' +
         '<div class="skin-desc">' + s.desc + '</div>' +
         '<div class="skin-bonus">+' + (s.bonus * 100).toFixed(0) + '% к доходу</div>' +
+        alt +
         '<button class="px-btn px-btn-small" data-act="skin" data-id="' + s.id + '"' + (((!owned && (!s.cost || ST.state.coins < s.cost)) || (owned && eq)) ? ' disabled' : '') + '>' + label + '</button>' +
         '</div></div>';
     }
@@ -260,6 +264,22 @@
     return rewards;
   }
 
+  /* ---------- открытие бокса с интригой ----------
+     Три фазы, как в Brawl Stars: интрига (темно, коробка еле дрожит) →
+     нарастание (тряска, лучи, блик) → взрыв (вспышка) и вылет добычи.
+     Таймеры хранятся, чтобы закрытие модалки не оставляло игру
+     в заблокированном состоянии `rolling`. */
+  var RAR_COLOR = { common: '#8ba0d0', rare: '#4ae0e0', epic: '#b05ae0', legend: '#ffd447' };
+  var rollTimers = [], rollToken = 0;
+  function schedule(fn, ms) {
+    rollTimers.push(setTimeout(fn, ms));
+  }
+  function endRoll() {
+    for (var i = 0; i < rollTimers.length; i++) clearTimeout(rollTimers[i]);
+    rollTimers = [];
+    rolling = false;
+  }
+
   function openBox(id, quiet) {
     if (rolling) return;
     var b = null;
@@ -299,28 +319,84 @@
       return;
     }
 
-    var m = UI.modalShell('ОТКРЫВАЕМ...', '<div class="box-open-stage" id="boxStage">' +
+    var myToken = ++rollToken;
+    var live = function () { return myToken === rollToken; };
+    var done = false;   /* фазы отыграли — закрытие больше не должно давать лут */
+    var rarCol = RAR_COLOR[b.rar] || RAR_COLOR.common;
+    var m = UI.modalShell('ОТКРЫВАЕМ...', '<div class="box-stage" style="--rar:' + rarCol + '">' +
+      '<div class="box-rays"></div>' +
+      '<div class="box-halo"></div>' +
       '<div class="box-shake">' + SPRHTML(b.sprite, 5) + '</div>' +
-      '<div class="box-shine"></div></div>');
-    setTimeout(function () {
+      '<div class="box-shine"></div>' +
+      '<div class="box-caption">ЗАМОК…</div>' +
+      '</div>');
+    paintDialogIcons(m);
+
+    /* Модалку можно закрыть до кульминации. Бокс уже оплачен, поэтому
+       добычу не теряем: отменяем оставшиеся фазы и выдаём лот сразу. */
+    m.addEventListener('click', function (e) {
+      if (!live() || done) return;
+      if (e.target !== m && !e.target.dataset.close) return;
+      rollToken++;
+      endRoll();
+      var rewards = rollLoot(b);
+      var big = rewards.some(function (r) { return r.big; });
+      if (big) { root.SND.play('rare'); FXcelebrate(); }
+      UI.toast('Открыто: ' + (rewards[0] ? rewards[0].label : b.name), big ? 'rare' : 'good', b.sprite);
+      render();
+      if (root.QUESTS) root.QUESTS.check();
+    });
+
+    var step = function (ms, fn) { schedule(function () { if (live()) fn(); }, ms); };
+    var caption = function (txt) {
+      var c = m.querySelector('.box-caption');
+      if (c) c.textContent = txt;
+    };
+
+    /* фаза 1 — интрига */
+    step(560, function () {
+      m.querySelector('.box-stage').classList.add('phase-tease');
+      root.SND.play('tick');
+    });
+    /* фаза 2 — нарастание: тряска быстрее, лучше видно свечение */
+    step(860, function () {
+      m.querySelector('.box-stage').classList.add('phase-build');
+      caption('СКРИП…');
+    });
+    /* тиканье, ускоряющееся к кульминации */
+    [1000, 1140, 1265, 1370].forEach(function (ms) {
+      step(ms, function () { root.SND.play('tick'); });
+    });
+    step(1370, function () { caption('СЕКУНДУ…'); });
+    /* фаза 3 — взрыв */
+    step(1470, function () {
+      m.querySelector('.box-stage').classList.add('phase-burst');
+      root.SND.play('levelUp');
+    });
+    /* добыча вылетает карточками по очереди */
+    step(1690, function () {
       var rewards = rollLoot(b);
       var big = rewards.some(function (r) { return r.big; });
       if (big) root.SND.play('rare');
-      var html = '<div class="loot-list' + (big ? ' big-loot' : '') + '">';
+      var html = '<div class="loot-reveal' + (big ? ' big-loot' : '') + '">';
+      html += '<div class="loot-box">' + SPRHTML(b.sprite, 3) + '</div>';
+      html += '<div class="loot-list">';
       for (var j = 0; j < rewards.length; j++) {
-        html += lootRow(rewards[j]);
+        html += lootRow(rewards[j], 300 + j * 110);
       }
-      html += '</div>';
-      m.querySelector('.px-modal-body').innerHTML =
-        '<div class="loot-box">' + SPRHTML(b.sprite, 3) + '</div>' + html;
+      html += '</div></div>';
+      m.querySelector('.px-modal-body').innerHTML = html;
+      paintDialogIcons(m);
+      rollTimers = [];
       rolling = false;
+      done = true;
       if (big) {
         UI.banner('РЕДКИЙ ДРОП!', 'banner-rare', 1400);
         FXcelebrate();
       }
       render();
       if (root.QUESTS) root.QUESTS.check();
-    }, 1400);
+    });
   }
 
   function FXcelebrate() {
@@ -331,9 +407,10 @@
     }
   }
 
-  function lootRow(r) {
+  function lootRow(r, delay) {
     var icon = { coins: 'coin', fish: 'img_fish', shells: 'shell', xp: 'i_star', ticket: 'ticket', effect: 'i_star', skin: 'orca', buff: 'starX2' }[r.t] || 'coin';
-    return '<div class="loot-row' + (r.big ? ' loot-big' : '') + '">' +
+    return '<div class="loot-row' + (r.big ? ' loot-big' : '') + '"' +
+      (delay ? ' style="animation-delay:' + delay + 'ms"' : '') + '>' +
       '<span class="loot-ic">' + SPRHTML(icon, 2) + '</span>' +
       '<span class="loot-label">' + r.label + '</span></div>';
   }
@@ -435,15 +512,8 @@
       '" style="width:' + (c.width * sc) + 'px;height:' + (c.height * sc) + 'px" data-spr="orca" data-pal="' + pal + '" data-sc="' + sc + '"></canvas>';
   }
   /* рисует все <canvas data-spr> внутри контейнера */
-  function paintIcons(ctx) {
-    UI.$$('canvas[data-spr]', ctx || document).forEach(function (c) {
-      if (c.dataset.painted) return;
-      var g = c.getContext('2d');
-      g.imageSmoothingEnabled = false;
-      SPR.draw(g, c.dataset.spr, 0, 0, parseInt(c.dataset.sc || '2', 10), { pal: c.dataset.pal || null, outline: true });
-      c.dataset.painted = '1';
-    });
-  }
+  function paintIcons(ctx) { UI.paintIcons(ctx || document); }
+  function paintDialogIcons(node) { UI.paintIcons(node); }
 
   function initClicks() {
     var shop = document.getElementById('shop');
@@ -536,6 +606,6 @@
     init: init, initClicks: initClicks, showTab: showTab, render: render,
     openBox: openBox, rollLoot: rollLoot, renderPrestige: renderPrestige,
     renderRanks: renderRanks, stopHold: stopHold,
-    paintIcons: paintIcons, tick: tick, SPRHTML: SPRHTML, orcaHTML: orcaHTML
+    paintIcons: paintIcons, paintDialogIcons: paintDialogIcons, tick: tick, SPRHTML: SPRHTML, orcaHTML: orcaHTML
   };
 })(typeof window !== 'undefined' ? window : globalThis);

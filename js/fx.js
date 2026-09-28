@@ -556,8 +556,6 @@
     var sq = 1 - orca.squash * 0.18;
     var wAdd = (1 - sq) * orca.w * 0.5;
     var bobY = Math.sin(orca.bob) * 2;
-    var sk = ST.skin(ST.state.skin);
-    var skinId = sk ? sk.id : 'normal';
     var art2 = art();
     var ax = orca.x - wAdd, ay = orca.y + bobY - (1 - sq) * 3;
 
@@ -570,7 +568,7 @@
     /* неоновое свечение */
     if (enabled.e2) {
       ctx.globalAlpha = 0.16 + 0.07 * Math.sin(t * 4);
-      ctx.fillStyle = skinId === 'cyberpunk' ? '#2ee0d0' : theme.amb;
+      ctx.fillStyle = theme.amb;
       var gw = orca.w * 1.25, gh = orca.h * 1.2;
       ctx.fillRect(Math.round(ax + orca.w / 2 - gw / 2), Math.round(ay + orca.h / 2 - gh / 2), Math.round(gw), Math.round(gh));
       ctx.globalAlpha = 1;
@@ -578,98 +576,6 @@
 
     SPR.draw(ctx, artKey(), ax, ay, sc2, { pal: stateSkinPal(), outline: true, flip: false });
 
-    /* ---- акценты конкретных кошек ---- */
-    if (skinId === 'cyberpunk') {
-      /* неоновые очки */
-      var vy = ay + orca.h * 0.30, vw = Math.max(2, Math.round(orca.w * 0.09));
-      ctx.fillStyle = '#2ee0d0';
-      ctx.fillRect(Math.round(ax + orca.w * 0.22), Math.round(vy), vw, Math.max(1, Math.round(orca.h * 0.035)));
-      ctx.fillRect(Math.round(ax + orca.w * 0.58), Math.round(vy), vw, Math.max(1, Math.round(orca.h * 0.035)));
-      ctx.fillStyle = '#ff4ad0';
-      ctx.fillRect(Math.round(ax + orca.w * 0.22), Math.round(vy), vw, 1);
-      ctx.fillRect(Math.round(ax + orca.w * 0.58), Math.round(vy), vw, 1);
-    } else if (skinId === 'richi') {
-      /* золотая корона + искры */
-      var cy2 = ay + orca.h * 0.02;
-      ctx.fillStyle = '#ffd447';
-      ctx.fillRect(Math.round(ax + orca.w * 0.30), Math.round(cy2), Math.max(2, Math.round(orca.w * 0.40)), Math.max(1, Math.round(orca.h * 0.03)));
-      for (var kq = 0; kq < 3; kq++) {
-        var kx = ax + orca.w * (0.32 + kq * 0.18);
-        ctx.fillRect(Math.round(kx), Math.round(cy2 - orca.h * 0.04), Math.max(1, Math.round(orca.w * 0.06)), Math.max(1, Math.round(orca.h * 0.04)));
-      }
-      for (var sp = 0; sp < 4; sp++) {
-        var sa = t * 1.5 + sp * 1.57;
-        var sx = ax + orca.w * (0.5 + Math.cos(sa) * 0.42);
-        var sy = ay + orca.h * (0.5 + Math.sin(sa * 1.3) * 0.4);
-        ctx.globalAlpha = 0.4 + 0.5 * Math.abs(Math.sin(sa * 2));
-        ctx.fillStyle = '#fff3c4';
-        ctx.fillRect(Math.round(sx), Math.round(sy), 2, 2);
-      }
-      ctx.globalAlpha = 1;
-    } else if (skinId === 'cute' || skinId === 'bugeyed') {
-      /* сердечки */
-      for (var hh = 0; hh < 3; hh++) {
-        var pa = t * 1.1 + hh * 2.1;
-        var hx = ax + orca.w * (0.15 + hh * 0.35) + Math.sin(pa) * 4;
-        var hy = ay - orca.h * 0.12 - ((pa * 12) % (orca.h * 0.6));
-        ctx.globalAlpha = Math.max(0, 0.75 - (hy < ay - orca.h * 0.6 ? 0.75 : 0));
-        ctx.fillStyle = '#ff8ab0';
-        ctx.fillRect(Math.round(hx), Math.round(hy), 3, 3);
-        ctx.fillRect(Math.round(hx - 1), Math.round(hy + 1), 5, 1);
-        ctx.fillRect(Math.round(hx), Math.round(hy + 2), 3, 1);
-      }
-      ctx.globalAlpha = 1;
-    } else if (skinId === 'chillcat') {
-      /* очки и «z» */
-      ctx.fillStyle = '#1a1a2a';
-      ctx.fillRect(Math.round(ax + orca.w * 0.20), Math.round(ay + orca.h * 0.30), Math.max(2, Math.round(orca.w * 0.26)), Math.max(1, Math.round(orca.h * 0.045)));
-      ctx.fillRect(Math.round(ax + orca.w * 0.54), Math.round(ay + orca.h * 0.30), Math.max(2, Math.round(orca.w * 0.26)), Math.max(1, Math.round(orca.h * 0.045)));
-      ctx.fillRect(Math.round(ax + orca.w * 0.46), Math.round(ay + orca.h * 0.30), Math.max(1, Math.round(orca.w * 0.06)), Math.max(1, Math.round(orca.h * 0.03)));
-      var zz = (Math.floor(t * 1.4) % 3) + 1;
-      ctx.fillStyle = '#dff6ff';
-      for (var zi = 0; zi < zz; zi++) {
-        var zx = ax + orca.w * (0.72 + zi * 0.10);
-        var zy = ay - orca.h * 0.1 - zi * orca.h * 0.11;
-        var zs = 2 + zi;
-        ctx.fillRect(Math.round(zx), Math.round(zy), zs * 3, zs);
-        ctx.fillRect(Math.round(zx + zs), Math.round(zy + zs), zs * 2, zs);
-        ctx.fillRect(Math.round(zx), Math.round(zy + zs * 2), zs * 3, zs);
-      }
-    } else if (skinId === 'wild') {
-      /* следы на воде */
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = theme.foam;
-      for (var wi = 0; wi < 3; wi++) {
-        var wpx = ax + orca.w * (0.1 + wi * 0.4) + ((t * 20) % 30);
-        ctx.fillRect(Math.round(wpx % W), Math.round(ay + orca.h * 1.02), 4, 1);
-      }
-      ctx.globalAlpha = 1;
-    } else if (skinId === 'beauty' || skinId === 'interesting') {
-      /* блёстки */
-      for (var bq = 0; bq < 3; bq++) {
-        var ba = t * 1.8 + bq * 2.4;
-        var bx = ax + orca.w * (0.2 + 0.6 * ((bq + t * 0.15) % 1));
-        var by = ay + orca.h * (0.15 + 0.5 * Math.abs(Math.sin(ba)));
-        ctx.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(ba * 1.7));
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
-        ctx.fillRect(Math.round(bx - 1), Math.round(by), 4, 1);
-        ctx.fillRect(Math.round(bx), Math.round(by - 1), 2, 4);
-      }
-      ctx.globalAlpha = 1;
-    } else if (skinId === 'chonky') {
-      /* толстая кошка чуть ниже и шире: усиливаем squash */
-      ctx.globalAlpha = 0.2;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(Math.round(ax + orca.w * 0.1), Math.round(ay + orca.h * 0.95), Math.round(orca.w * 0.8), 2);
-      ctx.globalAlpha = 1;
-    } else if (skinId === 'hiding') {
-      /* торчит только из-под «дивана» */
-      ctx.fillStyle = '#2a1f4a';
-      ctx.fillRect(Math.round(ax - 4), Math.round(ay + orca.h * 0.62), Math.round(orca.w + 8), Math.round(orca.h * 0.45));
-      ctx.fillStyle = '#3a2a5a';
-      ctx.fillRect(Math.round(ax - 4), Math.round(ay + orca.h * 0.62), Math.round(orca.w + 8), 2);
-    }
     /* пойманная рыба */
     if (caughtFish) {
       var a = 1 - caughtFish.life / caughtFish.max;

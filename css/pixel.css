@@ -150,10 +150,9 @@ canvas.px-icon { image-rendering: pixelated; vertical-align: middle; }
 .tag-clan { color: var(--purple); }
 .hide { display: none !important; }
 
+/* статус сервера — внутри HUD, третьим рядом, поэтому ничего не перекрывает */
 .conn {
-  position: fixed;
-  top: 6px; right: 6px;
-  z-index: 25;
+  margin-left: auto;
   display: flex; align-items: center; gap: 5px;
   font-family: var(--pixel);
   font-size: 7px;
@@ -164,19 +163,28 @@ canvas.px-icon { image-rendering: pixelated; vertical-align: middle; }
 }
 .conn i { width: 8px; height: 8px; display: block; border: 1px solid #000; }
 
-.acc-btn {
-  position: fixed;
-  top: 6px; left: 6px;
-  z-index: 25;
-  font-family: var(--pixel);
-  font-size: 8px;
-  padding: 5px 8px;
-  background: var(--panel2);
-  color: var(--text);
-  border: 2px solid var(--line);
-  box-shadow: 0 3px 0 var(--shadow);
+/* ================= ВАЛЮТЫ В HUD ================= */
+.hud-cur { gap: 4px; }
+.pill.cur {
   cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  position: relative;
+  padding-right: 12px;
 }
+.pill.cur::after {
+  content: '?';
+  position: absolute;
+  top: 1px; right: 2px;
+  font-family: var(--pixel);
+  font-size: 6px;
+  line-height: 1;
+  color: var(--dim);
+  opacity: 0.75;
+}
+.pill.cur:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--shadow); }
+.pill-shell b { color: #7fe6c0; }
+.pill-season b { color: #ff9a5c; }
 
 /* подсказка клика */
 .tap-hint {
@@ -337,6 +345,28 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
   border-bottom: 2px solid var(--line);
 }
 
+/* ================= ГАЙД «КАК ИГРАТЬ» ================= */
+.howto-lead {
+  font-size: 12px; color: var(--text); line-height: 1.6;
+  padding: 8px; margin-bottom: 4px;
+  background: rgba(74,224,224,0.08);
+  border-left: 3px solid var(--cyan);
+}
+.howto-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.howto-list li { font-size: 12px; line-height: 1.55; color: var(--text); }
+.howto-list li::marker { color: var(--cyan); }
+.howto-list b { color: var(--gold); }
+.cur-guide { display: flex; flex-direction: column; gap: 6px; }
+.cur-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 7px 8px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  font-size: 12px; line-height: 1.5;
+}
+.cur-ic { font-size: 16px; line-height: 1.2; flex: 0 0 auto; }
+.cur-row b { color: var(--gold); }
+
 /* ================= КАРТОЧКИ ================= */
 .px-card {
   display: flex;
@@ -391,6 +421,7 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
 .skin-name { font-family: var(--pixel); font-size: 8px; }
 .skin-desc { font-size: 10px; color: var(--dim); margin: 4px 0; }
 .skin-bonus { font-size: 11px; color: var(--green); margin-bottom: 5px; }
+.skin-alt { font-size: 10px; color: var(--purple); margin: -2px 0 5px; }
 .skin-card.equipped { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(255,212,71,0.25), 0 3px 0 var(--shadow); }
 .skin-card .px-btn { width: 100%; }
 #shopSkins { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
@@ -536,7 +567,77 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
 .fish-pick-spacefish { border-color: var(--purple); color: #e0b0ff; }
 .fish-pick-crab { border-color: var(--red); color: #ffc0c8; }
 
-/* ================= БОКСЫ (анимация) ================= */
+/* ================= БОКСЫ (интрига открытия) =================
+   Три фазы как в Brawl Stars: интрига → нарастание → взрыв и вылет добычи. */
+.box-stage {
+  --rar: #8ba0d0;
+  position: relative; height: 170px;
+  display: flex; align-items: center; justify-content: center;
+  background: #070b18; border: 3px solid var(--line);
+  overflow: hidden;
+}
+.box-stage .px-icon { position: relative; z-index: 3; }
+
+.box-rays {
+  position: absolute; left: 50%; top: 50%;
+  width: 420px; height: 420px; margin: -210px 0 0 -210px;
+  background: repeating-conic-gradient(from 0deg, var(--rar) 0deg 5deg, transparent 5deg 16deg);
+  opacity: 0; z-index: 1;
+  transition: opacity .45s steps(6);
+  animation: boxrays 7s linear infinite;
+}
+@keyframes boxrays { to { transform: rotate(360deg); } }
+
+.box-halo {
+  position: absolute; z-index: 2;
+  width: 140px; height: 140px; border-radius: 50%;
+  background: radial-gradient(circle, var(--rar) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity .4s steps(5);
+}
+.box-caption {
+  position: absolute; bottom: 10px; left: 0; right: 0;
+  text-align: center; z-index: 4;
+  font-family: var(--pixel); font-size: 9px; color: var(--dim);
+  letter-spacing: 1px;
+}
+
+/* фаза 1 — интрига: темнеет, коробка еле заметно дрожит */
+.box-stage.phase-tease { background: #04060d; }
+.box-stage.phase-tease .box-shake { animation: shakebox .32s steps(2) infinite; }
+.box-stage.phase-tease .box-halo { opacity: .16; }
+
+/* фаза 2 — нарастание: тряска, лучи и блик ускоряются */
+.box-stage.phase-build { border-color: var(--rar); }
+.box-stage.phase-build .box-rays { opacity: .28; }
+.box-stage.phase-build .box-halo { opacity: .48; }
+.box-stage.phase-build .box-shake { animation: shakebox .1s steps(2) infinite; }
+.box-stage.phase-build .box-shine { animation-duration: .55s; opacity: 1; }
+.box-stage.phase-build .box-caption { color: var(--rar); }
+
+/* фаза 3 — взрыв: белая вспышка, коробка лопается */
+.box-stage.phase-burst { background: #ffffff; border-color: #fff; }
+.box-stage.phase-burst .box-rays { opacity: .85; }
+.box-stage.phase-burst .box-halo { opacity: 1; }
+.box-stage.phase-burst .box-shake { animation: boxpop .3s steps(5) forwards; }
+.box-stage.phase-burst .box-shine,
+.box-stage.phase-burst .box-caption { display: none; }
+@keyframes boxpop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.5); }
+  100% { transform: scale(0); }
+}
+
+/* вылет добычи: карточки влетают по очереди */
+.loot-reveal { animation: revealflash .45s steps(4) 1; }
+@keyframes revealflash { from { background: rgba(255,255,255,0.35); } to { background: transparent; } }
+.loot-reveal .loot-row { animation: lootdrop .34s steps(4) both; }
+@keyframes lootdrop {
+  0%   { transform: translateX(-40px) scale(.7); opacity: 0; }
+  60%  { transform: translateX(4px) scale(1.06); opacity: 1; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
+
 .box-open-stage { position: relative; height: 150px; display: flex; align-items: center; justify-content: center; background: #0a0f22; border: 3px solid var(--line); overflow: hidden; }
 .box-shake { animation: shakebox 0.18s steps(2) infinite; }
 @keyframes shakebox {

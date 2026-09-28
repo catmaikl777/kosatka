@@ -34,6 +34,20 @@
     return c;
   }
 
+  /* рисует все <canvas data-spr> внутри контейнера.
+     Нужна и для модалок: их HTML собирается строками, поэтому иконки
+     в них не рисуются автоматически. */
+  function paintIcons(ctx) {
+    $$('canvas[data-spr]', ctx || document).forEach(function (c) {
+      if (c.dataset.painted) return;
+      var g = c.getContext('2d');
+      if (!g) return;
+      g.imageSmoothingEnabled = false;
+      SPR.draw(g, c.dataset.spr, 0, 0, parseInt(c.dataset.sc || '2', 10), { pal: c.dataset.pal || null, outline: true });
+      c.dataset.painted = '1';
+    });
+  }
+
   /* ---------- модальные окна ---------- */
   function open(id) {
     var m = typeof id === 'string' ? document.getElementById(id) : id;
@@ -199,7 +213,7 @@
   }
 
   root.UI = {
-    $: $, $$: $$, el: el, icon: icon,
+    $: $, $$: $$, el: el, icon: icon, paintIcons: paintIcons,
     open: open, close: close, closeAll: closeAll, isOpen: isOpen,
     toast: toast, confirm: confirm, prompt: prompt, modalShell: modalShell, closeEl: closeEl,
     tabs: tabs, bar: bar, floatText: floatText, shake: shake, banner: banner,

@@ -24,6 +24,7 @@
     wireMenu();
     wireSettings();
     wireStatus();
+    wireCurGuide();
     api.connect();
     api.on('status', function (s) { paintStatus(s); });
     paintStatus({ status: api.status });
@@ -80,7 +81,8 @@
   }
 
   function cacheEls() {
-    var ids = ['scene', 'hudCoins', 'hudLevel', 'hudClick', 'hudSec', 'hudFish', 'hudRank',
+    var ids = ['scene', 'hudCoins', 'hudLevel', 'hudClick', 'hudSec', 'hudFish', 'hudShells',
+      'hudSeason', 'hudRank', 'hudCur',
       'xpBar', 'xpTxt', 'connDot', 'connTxt', 'ticketCnt', 'adBtn', 'boostTag', 'comboTag',
       'dailyDot', 'clanTag', 'menuBtns', 'toastRoot'];
     ids.forEach(function (id) { els[id] = document.getElementById(id); });
@@ -94,6 +96,8 @@
     set(els.hudClick, ST.fmt(ST.perClick(root.CLICK.combo)));
     set(els.hudSec, ST.fmt(ST.perSecond()));
     set(els.hudFish, ST.fmt(s.fish));
+    set(els.hudShells, ST.fmt(s.shells || 0));
+    set(els.hudSeason, ST.fmt(s.eventSeasonScore || 0));
     set(els.hudRank, ST.rank());
     set(els.ticketCnt, ST.fmt(s.eventTickets || 0));
     if (els.xpBar) {
@@ -128,11 +132,60 @@
   function set(el, v) { if (el && el.textContent !== String(v)) el.textContent = v; }
   function setId(id, v) { set(document.getElementById(id), v); }
 
+  /* ---------- пояснения к валютам ----------
+     Каждая валюта в HUD кликабельна: тап открывает короткое объяснение,
+     зачем она нужна и где тратится. */
+  var CUR_GUIDE = {
+    coins: {
+      ic: '🐋', name: 'КОСАТКИ', color: 'var(--gold)',
+      text: '<b>Основная валюта.</b> Капает за клики, за пассивный доход, из боксов и за победы в PvP.<br><br>' +
+        '<b>Тратится на:</b> улучшения, скины, боксы и рекламу за монеты.<br>' +
+        '<b>Как быстрее копить:</b> держи комбо, прокачивай автодоход и меняй рыбу на косатки.'
+    },
+    fish: {
+      ic: '🐟', name: 'РЫБА', color: 'var(--cyan)',
+      text: '<b>Рыба — из рыбалки.</b> Не тонет сама: бросай крючок и кликай, пока не сорвалась.<br><br>' +
+        '<b>Тратится на:</b> обмен на косатки прямо в окне рыбалки (кнопка «ОБМЕНЯТЬ»).<br>' +
+        '<b>Как поднять цену:</b> улучшение «Магнит» увеличивает стоимость каждой рыбы.'
+    },
+    shells: {
+      ic: '🐚', name: 'РАКУШКИ', color: '#7fe6c0',
+      text: '<b>Постоянная валюта сброса.</b> Каждая ракушка даёт <b>+3% ко всему доходу</b> навсегда — и клику, и автодоходу.<br><br>' +
+        '<b>Откуда:</b> престиж (сброс) и редкий дроп из боксов.<br>' +
+        '<b>Важно:</b> ракушки не тратятся и не обнуляются. Чем больше накопил перед сбросом — тем быстрее новый виток.'
+    },
+    tickets: {
+      ic: '🎫', name: 'БИЛЕТЫ ИВЕНТА', color: 'var(--purple)',
+      text: '<b>Валюта сезонного ивента.</b> Капает автоматически: <b>1 билет за каждые 100 кликов</b>, плюс 1 билет за 10 кликов в баттле, плюс падает из боксов.<br><br>' +
+        '<b>Тратится на:</b> вход в ивент и пожертвование клану.<br>' +
+        '<b>Билеты не сгорают</b> — копите к следующему сезону.'
+    },
+    season: {
+      ic: '🏆', name: 'ОЧКИ СЕЗОНА', color: '#ff9a5c',
+      text: '<b>Рейтинг ивента.</b> Растёт от кликов, PvP и активности клана. Обнуляется в конце сезона.<br><br>' +
+        '<b>Зачем:</b> первые места сезона получают крупные призы, а лидеры — легендарные награды и скины.'
+    }
+  };
+  function wireCurGuide() {
+    var row = els.hudCur;
+    if (!row) return;
+    row.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cur]');
+      if (!b) return;
+      root.SND.resume();
+      root.SND.play('ui');
+      var c = CUR_GUIDE[b.dataset.cur];
+      if (!c) return;
+      UI.modalShell(c.ic + ' ' + c.name,
+        '<p class="dialog-text" style="line-height:1.7">' + c.text + '</p>');
+    });
+  }
+
   /* ---------- статус соединения ---------- */
   function wireStatus() {
     api.on('account', function (a) {
       var el = document.getElementById('accName');
-      set(el, a ? '@' + a.name : '👤 ГОСТЬ');
+      set(el, a ? '@' + a.name : 'Гость · прогресс только на этом устройстве');
       paintHUD();
       if (a) {
         /* подтягиваем облачное сохранение */
@@ -173,6 +226,7 @@
     { id: 'fish', ic: 'fish', name: 'РЫБАЛКА', fn: function () { root.FISH.open(); } },
     { id: 'quests', ic: 'i_book', name: 'КВЕСТЫ', fn: function () { UI.open('quests'); root.QUESTS.render(); } },
     { id: 'ach', ic: 'i_star', name: 'ДОСТИЖЕНИЯ', fn: function () { UI.open('achievements'); root.QUESTS.render(); } },
+    { id: 'howto', ic: 'i_book', name: 'КАК ИГРАТЬ', fn: function () { UI.open('howto'); } },
     { id: 'pvp', ic: 'i_sword', name: 'PvP', fn: function () { root.BATTLE.openPvP(); } },
     { id: 'raid', ic: 'i_team', name: 'РЕЙД 3x3', fn: function () { root.BATTLE.openRaid(); } },
     { id: 'clans', ic: 'i_team', name: 'КЛАНЫ', fn: function () { root.SOCIAL.openClans(); } },

@@ -23,26 +23,28 @@
 <canvas id="scene"></canvas>
 <div id="vignette"></div>
 
-<!-- аккаунт -->
-<button class="acc-btn" id="accBtn" onclick="SOCIAL.openAuth()">👤 ГОСТЬ</button>
-<div class="conn"><i id="connDot" style="background:#e04a5a"></i><span id="connTxt">СЕРВЕР: ОФЛАЙН</span></div>
-
 <!-- HUD -->
 <div class="hud">
   <div class="hud-row">
     <div class="pill pill-lvl"><span>УР</span><b id="hudLevel">1</b></div>
     <div class="xp-wrap"><i id="xpBar" style="width:0%"></i><span id="xpTxt">0/0</span></div>
-    <div class="pill pill-coin"><span>🐋</span><b id="hudCoins">0</b></div>
   </div>
   <div class="hud-row">
     <div class="pill"><span>👆</span><b id="hudClick">1</b></div>
     <div class="pill pill-cps"><span>⚡</span><b id="hudSec">0</b></div>
-    <div class="pill pill-fish"><span>🐟</span><b id="hudFish">0</b></div>
-    <div class="pill pill-ticket"><span>🎫</span><b id="ticketCnt">0</b></div>
+    <span class="rank-tag" id="hudRank">Малыш-дельфин</span>
     <span class="tag tag-boost hide" id="boostTag">x2</span>
     <span class="tag tag-combo hide" id="comboTag">x3</span>
     <span class="tag tag-clan hide" id="clanTag">клан</span>
-    <span class="rank-tag" id="hudRank">Малыш-дельфин</span>
+  </div>
+  <!-- все валюты игры: тап открывает объяснение -->
+  <div class="hud-row hud-cur" id="hudCur">
+    <button class="pill pill-coin cur" data-cur="coins" type="button"><span>🐋</span><b id="hudCoins">0</b></button>
+    <button class="pill pill-fish cur" data-cur="fish" type="button"><span>🐟</span><b id="hudFish">0</b></button>
+    <button class="pill pill-shell cur" data-cur="shells" type="button"><span>🐚</span><b id="hudShells">0</b></button>
+    <button class="pill pill-ticket cur" data-cur="tickets" type="button"><span>🎫</span><b id="ticketCnt">0</b></button>
+    <button class="pill pill-season cur" data-cur="season" type="button"><span>🏆</span><b id="hudSeason">0</b></button>
+    <div class="conn"><i id="connDot" style="background:#e04a5a"></i><span id="connTxt">СЕРВЕР: ОФЛАЙН</span></div>
   </div>
 </div>
 
@@ -70,6 +72,108 @@
     <div id="shopBoxes" style="display:none"></div>
     <div id="shopEffects" style="display:none"></div>
     <div id="shopRanks" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ================= КАК ИГРАТЬ ================= -->
+<div class="px-modal" id="howto">
+  <div class="px-modal-head">
+    <h3>📖 КАК ИГРАТЬ</h3>
+    <button class="px-btn px-btn-x" onclick="UI.close('howto')">×</button>
+  </div>
+  <div class="px-modal-body">
+    <p class="howto-lead">Ты — <b>косатка</b>. Корми стаю: кликай по себе и по воде, покупай улучшения, лови рыбу, вскрывай боксы и собирай скины. Чем дальше, тем дороже апгрейды — поэтому доход приходится постоянно умножать.</p>
+
+    <h4 class="sec-h">👆 КЛИК И ДОХОД</h4>
+    <ul class="howto-list">
+      <li><b>Клик</b> по косатке или по воде даёт косатки. Чем выше уровень и улучшения — тем дороже клик.</li>
+      <li><b>👆 / клик</b> в HUD — сколько ты получаешь за клик. <b>⚡ / сек</b> — пассивный доход в секунду.</li>
+      <li><b>Комбо</b> — кликай без пауз. Каждые 5 кликов растёт множитель комбо (до ×1.5). Это самый дешёвый множитель в игре.</li>
+      <li><b>Крит</b> — золотая цифра = крит. Шанс растёт от улучшения «Криты», множитель — от «Ярости». Критический дождь делает шанс 100% на 8 секунд.</li>
+      <li><b>Бонусы на воде</b> — иногда падают ×2, ×5 и «Морской дождь» (×1.5 на 5 минут). Кликай по ним, пока не исчезли.</li>
+      <li><b>Офлайн-доход</b> — стая копит монеты, пока тебя нет. Максимум накапливается за 8 часов.</li>
+    </ul>
+
+    <h4 class="sec-h">⚡ УЛУЧШЕНИЯ</h4>
+    <ul class="howto-list">
+      <li>Покупаются за косатки, цена растёт с каждым уровнем. Есть кнопки <b>×1</b>, <b>×10</b> и <b>MAX</b> — MAX выгоднее, если косаток хватает.</li>
+      <li><b>Клик</b>: когти, сила, эхо, голос, плавник — множитель клика.</li>
+      <li><b>Автодоход</b>: мини-стая, охотник, дрон, флот — косатки в секунду без кликов.</li>
+      <li><b>Комбо, криты, ярость, удача, магнит, прилив, билет</b> — усиливают комбо, криты, редкость дропа, цену рыбы, множитель всего и добычу билетов.</li>
+    </ul>
+
+    <h4 class="sec-h">💎 ВАЛЮТЫ</h4>
+    <div class="cur-guide">
+      <div class="cur-row"><span class="cur-ic">🐋</span><div><b>Косатки</b> — основная валюта. Капает за клики, автодоход и боксы. Тратится на улучшения, скины и боксы.</div></div>
+      <div class="cur-row"><span class="cur-ic">🐟</span><div><b>Рыба</b> — из рыбалки. Обменивается на косатки в рыбалке; цену поднимает улучшение «Магнит».</div></div>
+      <div class="cur-row"><span class="cur-ic">🐚</span><div><b>Ракушки</b> — валюта сброса. Каждая даёт <b>+3%</b> ко всему доходу навсегда. Только из престижа и боксов.</div></div>
+      <div class="cur-row"><span class="cur-ic">🎫</span><div><b>Билеты ивента</b> — 1 билет за каждые 100 кликов, за 10 кликов в баттле и из боксов. Тратятся в ивенте и клане.</div></div>
+      <div class="cur-row"><span class="cur-ic">🏆</span><div><b>Очки сезона</b> — рейтинг ивента. Растёт от кликов, даёт призовые места и легендарные награды.</div></div>
+    </div>
+
+    <h4 class="sec-h">🐟 РЫБАЛКА</h4>
+    <ul class="howto-list">
+      <li>Рыба не тонет сама — бросай крючок и <b>успевай кликать</b>, пока таймер не кончился.</li>
+      <li>Чем дольше держишь рыбу, тем больше косаток. Не поймал — рыба срывается, утерянного не вернуть.</li>
+      <li>Рыбу можно обменять на косатки. <b>Рыбные боксы</b> не дают монет вообще — только эффекты и бусты.</li>
+    </ul>
+
+    <h4 class="sec-h">🎁 БОКСЫ</h4>
+    <ul class="howto-list">
+      <li>Боксы дают косатки, рыбу, ракушки, опыт, билеты, эффекты, скины и временные бусты ×2 / ×3 / ×5.</li>
+      <li>Кнопка <b>ОТКРЫТЬ ×10</b> — тап открывает один, а <b>удержание</b> открывает пачку из 10, пока хватает косаток.</li>
+      <li>Удача (улучшение «Удача») и боксы попроще чаще падают крупные награды. Все скины из боксов равны шансу между собой.</li>
+    </ul>
+
+    <h4 class="sec-h">👑 СКИНЫ</h4>
+    <ul class="howto-list">
+      <li>Каждый скин даёт <b>постоянный процент к доходу</b> (+3%…+22%). Чем дороже скин — тем больше бонус.</li>
+      <li>Скины бывают двух видов: за косатки в магазине и из боксов / ивента / рейда / достижений. Купить можно любой, у которого есть цена.</li>
+      <li>Надеть можно сколько угодно — надетый скин даёт бонус всегда, пока выбран.</li>
+    </ul>
+
+    <h4 class="sec-h">✨ ЭФФЕКТЫ</h4>
+    <ul class="howto-list">
+      <li>Эффекты — это не только картинки: часть реально умножает клик или автодоход. Каждый можно включить и выключить в настройках.</li>
+      <li>Покупаются в магазине за косатки или выпадают из боксов. Общий множитель эффектов ограничен, чтобы не сломать игру.</li>
+    </ul>
+
+    <h4 class="sec-h">📋 КВЕСТЫ И ДОСТИЖЕНИЯ</h4>
+    <ul class="howto-list">
+      <li><b>Задания</b> выдаются по порядку: выполнил — получил косатки, открылось следующее. Прогресс общий для ежедневных.</li>
+      <li><b>Достижения</b> — постоянные цели за всё время игры: улучшения, скины, эффекты, рыбалка, боксы, PvP, рейды, кланы.</li>
+    </ul>
+
+    <h4 class="sec-h">🎖️ УРОВНИ И РАНГИ</h4>
+    <ul class="howto-list">
+      <li>Опыт капает за косатки. Каждый уровень — <b>+2% ко всему доходу</b>, разово на старте +2% за клик.</li>
+      <li><b>Ранги</b> — отдельные награды за количество кликов. Их можно забрать один раз и навсегда.</li>
+    </ul>
+
+    <h4 class="sec-h">⚔️ PvP И РЕЙД 3×3</h4>
+    <ul class="howto-list">
+      <li><b>PvP</b> — дуэль с игроком или ботом. Победа даёт косатки и очки сезона, поражение — меньше косаток, но прогресс капает.</li>
+      <li><b>Рейд 3×3</b> — общий бой с командой из трёх. За победу можно получить легендарные скины.</li>
+    </ul>
+
+    <h4 class="sec-h">👥 КЛАНЫ И 🏆 ИВЕНТ</h4>
+    <ul class="howto-list">
+      <li><b>Клан</b> даёт общий бонус к доходу: он растёт вместе с уровнем клана. Вкладывайте монеты в общее хранилище.</li>
+      <li><b>Ивент</b> — 7 дней сезона. Капают билеты и очки, за них выдают призы и легендарные награды.</li>
+    </ul>
+
+    <h4 class="sec-h">🐚 ПРЕСТИЖ (СБРОС)</h4>
+    <ul class="howto-list">
+      <li>Когда монет очень много, <b>«СБРОС»</b> обнуляет косатки, уровень и улучшения и выдаёт <b>ракушки</b>.</li>
+      <li>Ракушки не тратятся и дают +3% ко всему доходу каждая. Скины, эффекты, ранг и достижения остаются.</li>
+    </ul>
+
+    <h4 class="sec-h">💾 СОХРАНЕНИЕ</h4>
+    <ul class="howto-list">
+      <li>Прогресс сохраняется сам и <b>каждые 20 секунд</b>. Локально — в браузере.</li>
+      <li><b>Войди в аккаунт</b> (кнопка «АККАУНТ» в меню), чтобы прогресс хранился в облаке и пережил очистку кэша.</li>
+      <li>В настройках есть экспорт и импорт сейва строкой кода — для переноса на другое устройство.</li>
+    </ul>
   </div>
 </div>
 
@@ -152,6 +256,9 @@
     <div class="dim" style="margin-top:6px">Войди в аккаунт — прогресс будет храниться в облаке.</div>
 
     <h4 class="sec-h">🔐 АККАУНТ</h4>
+    <div class="px-card" style="align-items:center;gap:8px;margin-bottom:6px">
+      <span>👤</span><b id="accName" style="font-size:12px">Гость</b>
+    </div>
     <button class="px-btn px-btn-wide px-btn-alt" id="btnAuth2" onclick="SOCIAL.openAuth()">🔐 ВОЙТИ / РЕГИСТРАЦИЯ</button>
 
     <h4 class="sec-h">☠️ ОПАСНАЯ ЗОНА</h4>
@@ -179,8 +286,7 @@
 <script src="js/battle.js"></script>
 <script src="js/main.js"></script>
 <script>
-/* кнопка аккаунта в HUD */
-document.getElementById('accBtn').addEventListener('click', function () { SOCIAL.openAuth(); });
+/* кнопка аккаунта в настройках */
 document.getElementById('btnAuth2').addEventListener('click', function () { UI.close('settings'); });
 </script>
 </body>
