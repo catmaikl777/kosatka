@@ -175,10 +175,10 @@
   function clanLeave() { return send('clan:leave', {}, 8000); }
   function clanDelete() { return send('clan:delete', {}, 8000); }
   function clanDonate(coins) { return send('clan:donate', { coins: coins }, 8000); }
+  /* Бонус клана присылает сервер уже с учётом казны
+     (server.js clanState → clanBonus), поэтому берём его как есть. */
   function clanBonus() {
-    if (!clanState) return 0;
-    var b = (clanState.bonus || 0) + (clanState.treasury >= 1e6 ? Math.min(0.25, Math.floor(clanState.treasury / 1e6) * 0.01) : 0);
-    return b;
+    return clanState ? (clanState.bonus || 0) : 0;
   }
 
   /* ---------- PvP ---------- */

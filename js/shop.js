@@ -11,7 +11,7 @@
 
   /* ---------- вкладки ---------- */
   function showTab(name) {
-    var map = { upgrades: 'shopUpgrades', skins: 'shopSkins', boxes: 'shopBoxes', fx: 'shopEffects' };
+    var map = { upgrades: 'shopUpgrades', skins: 'shopSkins', boxes: 'shopBoxes', fx: 'shopEffects', ranks: 'shopRanks' };
     for (var k in map) {
       var e = document.getElementById(map[k]);
       if (e) e.style.display = k === name ? '' : 'none';
@@ -28,6 +28,7 @@
     else if (tabName === 'skins') renderSkins();
     else if (tabName === 'boxes') renderBoxes();
     else if (tabName === 'fx') renderEffects();
+    else if (tabName === 'ranks') renderRanks();
   }
 
   /* ---------- улучшения ---------- */
@@ -100,7 +101,7 @@
       var locked = !owned && !s.cost;
       var label = owned ? (eq ? 'НАДЕТ' : 'НАДЕТЬ') : locked ? lockLabel(s) : ST.fmt(s.cost);
       html += '<div class="px-card skin-card' + (eq ? ' equipped' : '') + (locked ? ' locked' : '') + '">' +
-        '<div class="skin-art">' + orcaHTML(s.pal, 4) + '</div>' +
+        '<div class="skin-art">' + SPRHTML(s.art || 'orca', 3) + '</div>' +
         '<div class="skin-meta">' +
         '<div class="skin-name">' + s.name + ' ' + UI.rarityBadge(s.rar) + '</div>' +
         '<div class="skin-desc">' + s.desc + '</div>' +
@@ -113,8 +114,8 @@
   function lockLabel(s) {
     if (s.box) return 'Из бокса: ' + D.BOXES.filter(function (b) { return b.id === s.box; }).map(function (b) { return b.name; })[0];
     if (s.event) return 'Награда за ивент';
-    if (s.raid) return s.raid + ' побед в рейде';
-    if (s.prestige) return 'Первый сброс в океан';
+    if (s.raid) return 'Победа в рейде ×' + s.raid;
+    if (s.secret) return 'Секрет: 100% достижений';
     return 'Недоступно';
   }
   function skinClick(id) {
@@ -122,12 +123,14 @@
     if (owned) {
       ST.equipSkin(id);
       root.SND.play('ui');
+      root.SND.meow();
       UI.toast('Скин надет', 'good', 'i_crown');
     } else {
       var s = ST.skin(id);
       if (!s || !s.cost) { UI.toast('Этот скин ещё не открыт', 'bad', 'i_lock'); return; }
       if (ST.buySkin(id)) {
         root.SND.play('levelUp');
+        root.SND.meow();
         UI.banner('НОВЫЙ ОБЛИК!', 'banner-good', 1200);
         UI.toast('Куплен скин: ' + s.name, 'good', 'i_crown');
       } else {
@@ -146,16 +149,53 @@
     for (var i = 0; i < D.BOXES.length; i++) {
       var b = D.BOXES[i];
       var afford = ST.state.coins >= b.cost;
-      html += '<div class="px-card box-card">' +
+      html += '<div class="px-card box-card" data-box="' + b.id + '">' +
         '<div class="box-art">' + SPRHTML(b.sprite, 3) + '</div>' +
         '<div class="box-meta">' +
         '<div class="box-name">' + b.name + ' ' + UI.rarityBadge(b.rar) + '</div>' +
         '<div class="box-desc">' + b.desc + '</div>' +
-        '<button class="px-btn px-btn-primary" data-act="box" data-id="' + b.id + '"' + (afford ? '' : ' disabled') + '>' +
-        (afford ? 'ОТКРЫТЬ · ' + ST.fmt(b.cost) : ST.fmt(b.cost) + ' ❤') + '</button>' +
+        '<button class="px-btn px-btn-primary hold-open" data-act="box" data-id="' + b.id + '"' + (afford ? '' : ' disabled') + '>' +
+        (afford ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤') + '</button>' +
+        '<div class="box-hint">удерживай, чтобы открыть 10 подряд</div>' +
         '</div></div>';
     }
     box.innerHTML = html;
+  }
+
+  /* ---------- открытие нескольких боксов подряд ----------
+     Удержание кнопки открывает боксы очередью: один раз в 1.4 с,
+     пока хватает косаток или игрок не отпустил кнопку. */
+  var holdTimer = null, holdId = null, holdRepeat = null;
+  var quietLast = 0, quietCount = 0, quietBig = false, quietLabel = '';
+  function stopHold() {
+    if (holdRepeat) { clearTimeout(holdRepeat); holdRepeat = null; }
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    holdId = null;
+    if (quietCount > 0) {
+      var n = quietCount;
+      var last = quietLabel;
+      /* флаги читаем ДО сброса — иначе редкий лут никогда не
+         получал ни rare-тост, ни праздник */
+      var wasBig = quietBig;
+      quietCount = 0; quietBig = false; quietLabel = '';
+      UI.toast('Открыто ' + n + ' · ' + last, wasBig ? 'rare' : 'good', 'img_chest');
+      if (wasBig) { root.SND.play('rare'); FXcelebrate(); }
+    }
+  }
+  function startHold(id) {
+    if (rolling || holdId === id) return;
+    holdId = id;
+    function again() {
+      if (holdId !== id) return;
+      var b = null;
+      for (var i = 0; i < D.BOXES.length; i++) if (D.BOXES[i].id === id) b = D.BOXES[i];
+      if (!b || ST.state.coins < b.cost) { stopHold(); return; }
+      holdTimer = setTimeout(function () {
+        openBox(id, true);
+        holdTimer = setTimeout(again, 1500);
+      }, 350);
+    }
+    again();
   }
 
   function rollLoot(b) {
@@ -188,8 +228,14 @@
     } else if (pick.t === 'ticket') {
       ST.addTickets(amount);
       rewards.push({ t: 'ticket', v: amount, label: amount + ' билет(ов) ивента' });
+    } else if (pick.t === 'buff') {
+      var bf = ST.addBuff(pick.mult, pick.dur, pick.name);
+      rewards.push({ t: 'buff', v: bf.mult, label: pick.name || ('x' + pick.mult), big: pick.mult >= 3 });
     } else if (pick.t === 'effect') {
-      var pool = D.EFFECTS.filter(function (e) { return !ST.hasEffect(e.id); });
+      var pool = D.EFFECTS.filter(function (e) {
+        if (ST.hasEffect(e.id)) return false;
+        return !pick.rar || e.rar === pick.rar;
+      });
       if (pool.length) {
         var e = pool[Math.floor(Math.random() * pool.length)];
         ST.unlockEffect(e.id);
@@ -214,18 +260,44 @@
     return rewards;
   }
 
-  function openBox(id) {
+  function openBox(id, quiet) {
     if (rolling) return;
     var b = null;
     for (var i = 0; i < D.BOXES.length; i++) if (D.BOXES[i].id === id) b = D.BOXES[i];
     if (!b) return;
-    if (ST.state.coins < b.cost) { root.SND.play('deny'); UI.toast('Не хватает косаток', 'bad', 'i_coin'); return; }
+    if (ST.state.coins < b.cost) { if (!quiet) { root.SND.play('deny'); UI.toast('Не хватает косаток', 'bad', 'i_coin'); } return; }
     ST.spend(b.cost);
     rolling = true;
     root.SND.play('box');
     ST.state.stats.boxesOpened++;
     ST.bump('boxesOpened');
     ST.bump('boxesOpenedDaily');
+    if (b.fish) { ST.state.stats.fishBoxes++; ST.bump('fishBoxes'); }
+
+    /* тихое открытие при удержании: без модалки, короткая анимация карточки */
+    if (quiet) {
+      var card = document.querySelector('.box-card[data-box="' + id + '"]');
+      if (card) {
+        card.classList.remove('box-bump');
+        void card.offsetWidth;
+        card.classList.add('box-bump');
+      }
+      setTimeout(function () {
+        var rq = rollLoot(b);
+        var isBig = rq.some(function (r) { return r.big; });
+        if (isBig) { root.SND.play('rare'); FXcelebrate(); }
+        quietCount++;
+        if (isBig) quietBig = true;
+        quietLabel = (rq[0] || { label: b.name }).label;
+        /* не спамим тостами: один раз в ~420 мс, итог — при отпускании */
+        var now = Date.now();
+        if (now - quietLast > 420) { quietLast = now; UI.toast(quietLabel, isBig ? 'rare' : 'good', b.sprite); }
+        rolling = false;
+        updateBoxButtons();
+        if (root.QUESTS) root.QUESTS.check();
+      }, 300);
+      return;
+    }
 
     var m = UI.modalShell('ОТКРЫВАЕМ...', '<div class="box-open-stage" id="boxStage">' +
       '<div class="box-shake">' + SPRHTML(b.sprite, 5) + '</div>' +
@@ -260,10 +332,49 @@
   }
 
   function lootRow(r) {
-    var icon = { coins: 'coin', fish: 'fish', shells: 'shell', xp: 'i_star', ticket: 'ticket', effect: 'i_star', skin: 'orca' }[r.t] || 'coin';
+    var icon = { coins: 'coin', fish: 'img_fish', shells: 'shell', xp: 'i_star', ticket: 'ticket', effect: 'i_star', skin: 'orca', buff: 'starX2' }[r.t] || 'coin';
     return '<div class="loot-row' + (r.big ? ' loot-big' : '') + '">' +
       '<span class="loot-ic">' + SPRHTML(icon, 2) + '</span>' +
       '<span class="loot-label">' + r.label + '</span></div>';
+  }
+
+  /* ---------- ранги за клики ---------- */
+  function renderRanks() {
+    var box = document.getElementById('shopRanks');
+    if (!box) return;
+    var clicks = ST.state.stats.clicks;
+    var done = 0, claimed = 0;
+    for (var i = 0; i < D.RANKS.length; i++) {
+      if (clicks >= D.RANKS[i].clicks) done++;
+      if (ST.rankClaimed(D.RANKS[i].id)) claimed++;
+    }
+    var next = ST.nextRank();
+    var html = '<div class="rank-head">' +
+      '<div class="rank-stat"><span>Всего кликов</span><b>' + ST.fmt(clicks) + '</b></div>' +
+      '<div class="rank-stat"><span>Освоено рангов</span><b>' + done + ' / ' + D.RANKS.length + '</b></div>' +
+      '<div class="rank-stat"><span>Награды забраны</span><b>' + claimed + '</b></div></div>' +
+      (next
+        ? '<div class="rank-next">До ранга «' + next.name + '» — <b>' + ST.fmt(Math.max(0, next.clicks - clicks)) + '</b> кликов</div>'
+        : '<div class="rank-next rank-max">Все ранги покорены. Океан запомнит твои клики.</div>') +
+      '<div class="rank-list">';
+    for (var j = 0; j < D.RANKS.length; j++) {
+      var r = D.RANKS[j];
+      var isClaimed = ST.rankClaimed(r.id);
+      var avail = ST.rankAvailable(r);
+      var reached = clicks >= r.clicks;
+      var state = isClaimed ? 'done' : avail ? 'ready' : reached ? 'wait' : 'locked';
+      html += '<div class="px-card rank-card rank-' + state + '">' +
+        '<div class="rank-ic">' + SPRHTML(r.ic, 2) + '</div>' +
+        '<div class="rank-meta">' +
+        '<div class="rank-name">' + r.name + (isClaimed ? ' <span class="rank-ok">✓</span>' : '') + '</div>' +
+        '<div class="rank-need">' + (reached ? 'порог пройден' : 'нужно ' + ST.fmt(r.clicks) + ' кликов') + '</div>' +
+        '</div>' +
+        '<button class="px-btn px-btn-small ' + (avail ? 'px-btn-primary' : '') + '" data-act="rank" data-id="' + r.id + '"' +
+        (avail ? '' : ' disabled') + '>' + (isClaimed ? 'ЗАБРАНО' : '+' + ST.fmt(r.reward)) + '</button>' +
+        '</div>';
+    }
+    html += '</div>';
+    box.innerHTML = html;
   }
 
   /* ---------- эффекты ---------- */
@@ -318,7 +429,7 @@
     return '<canvas class="px-icon" width="' + (c.width * sc) + '" height="' + (c.height * sc) +
       '" style="width:' + (c.width * sc) + 'px;height:' + (c.height * sc) + 'px" data-spr="' + name + '" data-sc="' + sc + '"></canvas>';
   }
-  function orcaHTML(pal, sc) {
+  function orcaHTML(pal, sc) {   /* оставлено для ASCII-спрайтов и фолбэков */
     var c = SPR.get('orca', pal);
     return '<canvas class="px-icon orca-icon" width="' + (c.width * sc) + '" height="' + (c.height * sc) +
       '" style="width:' + (c.width * sc) + 'px;height:' + (c.height * sc) + 'px" data-spr="orca" data-pal="' + pal + '" data-sc="' + sc + '"></canvas>';
@@ -346,11 +457,50 @@
       else if (act === 'buymax') buy(b.dataset.id, 'max');
       else if (act === 'skin') skinClick(b.dataset.id);
       else if (act === 'box') openBox(b.dataset.id);
+      else if (act === 'rank') {
+        var r = ST.claimRank(b.dataset.id);
+        if (r) {
+          root.SND.play('level');
+          UI.toast('Ранг «' + r.name + '»: +' + ST.fmt(r.reward), 'good', r.ic);
+          render();
+        }
+      }
     });
     shop.addEventListener('click', function (e) {
       var t = e.target.closest('[data-tab]');
       if (t) showTab(t.dataset.tab);
     });
+    /* удержание = открыть пачку */
+    shop.addEventListener('pointerdown', function (e) {
+      var b = e.target.closest('.hold-open');
+      if (!b || b.disabled) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      b.setPointerCapture && e.pointerId != null && b.setPointerCapture(e.pointerId);
+      startHold(b.dataset.id);
+    });
+    shop.addEventListener('pointerup', stopHold);
+    shop.addEventListener('pointercancel', stopHold);
+    shop.addEventListener('pointerleave', stopHold);
+    window.addEventListener('blur', stopHold);
+  }
+
+  /* мягко обновляет цену на кнопках боксов, не перерисовывая карточки */
+  function updateBoxButtons() {
+    var box = document.getElementById('shopBoxes');
+    if (!box) return;
+    for (var i = 0; i < D.BOXES.length; i++) {
+      var b = D.BOXES[i];
+      var card = box.querySelector('.box-card[data-box="' + b.id + '"]');
+      if (!card) continue;
+      var btn = card.querySelector('.hold-open');
+      if (!btn) continue;
+      var aff = ST.state.coins >= b.cost;
+      if (btn.dataset.aff === String(aff)) continue;
+      btn.dataset.aff = String(aff);
+      btn.disabled = !aff;
+      btn.textContent = aff ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤';
+    }
   }
 
   function tick() {
@@ -385,6 +535,7 @@
   root.SHOP = {
     init: init, initClicks: initClicks, showTab: showTab, render: render,
     openBox: openBox, rollLoot: rollLoot, renderPrestige: renderPrestige,
+    renderRanks: renderRanks, stopHold: stopHold,
     paintIcons: paintIcons, tick: tick, SPRHTML: SPRHTML, orcaHTML: orcaHTML
   };
 })(typeof window !== 'undefined' ? window : globalThis);

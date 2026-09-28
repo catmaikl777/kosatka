@@ -204,11 +204,12 @@
       var gv = d.querySelector('#clanGive10');
       gv.addEventListener('click', function () {
         if ((ST.state.eventTickets || 0) < 10) { UI.toast('Мало билетов', 'bad', 'ticket'); return; }
-        API.send('clan:tickets', { n: 10 }).then(function () {
-          ST.state.eventTickets -= 10;
+        /* обмен билетов на очки сезона — тот же эндпоинт, что и в окне ивента */
+        API.send('event:exchange', { n: 10 }).then(function (r) {
+          ST.state.eventTickets = (r && r.tickets != null) ? r.tickets : ST.state.eventTickets - 10;
           ST.save();
           root.SND.play('buy');
-          UI.toast('10 билетов → очки клана', 'good', 'ticket');
+          UI.toast('10 билетов → ' + ST.fmt((r && r.points) || 100) + ' очков клана', 'good', 'ticket');
           refreshClans(m);
         }).catch(function (e) { UI.toast(e.message, 'bad', 'ticket'); });
       });

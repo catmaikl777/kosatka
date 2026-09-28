@@ -1,7 +1,8 @@
 /* ============================================================
-   PIXEL ORCA — 8-bit аудио (WebAudio, без файлов)
-   SFX: синтезированные «квадраты» и шум.
-   Музыка: секвенсор 8-битного лупа.
+   PIXEL ORCA — аудио
+   Основные звуки и музыка берутся из репозитория orca-clicker
+   (настоящие mp3). Если файл не загрузился — играем синтезированный
+   8-битный вариант, чтобы звук был всегда.
    ============================================================ */
 (function (root) {
   'use strict';
@@ -96,6 +97,87 @@
     }
   }
 
+  /* ---------- mp3 из репозитория ----------
+     Грузим лениво и по одному разу: 2.4 МБ звуков не нужно тянуть
+     до первого клика. Любая ошибка молча оставляет синтезированный звук. */
+  var SAMPLES = {
+    click: { src: 'audio/click.mp3', vol: 0.35 },
+    buy: { src: 'audio/buy.mp3', vol: 0.4 },
+    crit: { src: 'audio/crit.mp3', vol: 0.42 },
+    levelUp: { src: 'audio/level.mp3', vol: 0.42 },
+    bonus: { src: 'audio/bonusmeow.mp3', vol: 0.42 },
+    meow1: { src: 'audio/mainmeow1.mp3', vol: 0.4 },
+    meow2: { src: 'audio/mainmeow2.mp3', vol: 0.4 },
+    meow3: { src: 'audio/mainmeow3.mp3', vol: 0.4 },
+    meow4: { src: 'audio/mainmeow4.mp3', vol: 0.4 }
+  };
+  var MUSIC_SRC = 'audio/bg_music.mp3';
+
+  var buffers = {};      /* ключ → AudioBuffer */
+  var loading = {};      /* ключ → true, пока идёт загрузка */
+  var failed = {};       /* ключ → true, если файл не загрузился */
+  var meowIdx = 0;
+  var musicBuf = null, musicLoading = false, musicSrcNode = null;
+
+  function decode(src, cb) {
+    if (!root.fetch || !ctx) return;
+    fetch(src).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.arrayBuffer();
+    }).then(function (ab) {
+      return new Promise(function (res, rej) {
+        /* Safari и старые браузеры — только колбэк */
+        var p = ctx.decodeAudioData(ab, res, rej);
+        if (p && p.then) p.then(res, rej);
+      });
+    }).then(function (buf) {
+      cb(null, buf);
+    }).catch(function () {
+      cb(null, null);
+    });
+  }
+
+  function sampleBuffer(key) {
+    var spec = SAMPLES[key];
+    if (!spec) return null;
+    if (buffers[key]) return buffers[key];
+    if (loading[key]) return null;
+    loading[key] = true;
+    decode(spec.src, function (err, buf) {
+      delete loading[key];
+      if (buf) buffers[key] = buf;
+      else failed[key] = true;   /* не мучаем сеть, если файла нет */
+    });
+    return null;
+  }
+
+  function playBuffer(buf, gainNode, vol, rate) {
+    if (!buf || !ctx) return false;
+    var src = ctx.createBufferSource();
+    src.buffer = buf;
+    if (rate) src.playbackRate.value = rate;
+    var g = ctx.createGain();
+    g.gain.value = vol == null ? 0.4 : vol;
+    src.connect(g);
+    g.connect(gainNode || sfxGain);
+    src.start(0);
+    return true;
+  }
+
+  /* мяукание кошки: играет один из четырёх оригинальных вариантов */
+  function meow() {
+    if (!init()) return false;
+    resume();
+    if (!sfxOn) return false;
+    meowIdx = (meowIdx + 1) % 4;
+    var key = 'meow' + (meowIdx + 1);
+    var b = sampleBuffer(key);
+    if (b) return playBuffer(b, sfxGain, SAMPLES[key].vol);
+    /* фолбэк: то же, что крит, но тише */
+    SFX.ui();
+    return false;
+  }
+
   /* ---------- SFX ---------- */
   var clickCount = 0;
   var SFX = {
@@ -184,6 +266,11 @@
     if (!init()) return;
     resume();
     if (!sfxOn) return;
+    /* сначала настоящий звук из репозитория, иначе — синтез */
+    if (SAMPLES[name] && !failed[name]) {
+      var b = sampleBuffer(name);
+      if (b && playBuffer(b, sfxGain, SAMPLES[name].vol)) return;
+    }
     var f = SFX[name];
     if (f) { try { f(); } catch (e) { /* ignore */ } }
   }
@@ -245,10 +332,50 @@
     }
   }
 
+  /* ---------- МУЗЫКА ----------
+     Пробуем зацикленный трек из репозитория; если он недоступен —
+     играет 8-битный секвенсор ниже. */
+  function startLoop() {
+    if (!musicBuf || !ctx) return false;
+    stopLoop();
+    var src = ctx.createBufferSource();
+    src.buffer = musicBuf;
+    src.loop = true;
+    var g = ctx.createGain();
+    g.gain.value = 0.5;
+    src.connect(g);
+    g.connect(musGain);
+    src.start(0);
+    musicSrcNode = src;
+    return true;
+  }
+  function stopLoop() {
+    if (musicSrcNode) {
+      try { musicSrcNode.stop(0); } catch (e) { /* ignore */ }
+      musicSrcNode = null;
+    }
+  }
+  function loadMusic() {
+    if (musicBuf || musicLoading) return;
+    musicLoading = true;
+    decode(MUSIC_SRC, function (err, buf) {
+      musicLoading = false;
+      if (!buf) return;
+      musicBuf = buf;
+      if (!musicOn) return;
+      /* mp3 успел загрузиться — выключаем секвенсор и переходим на него */
+      if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+      startLoop();
+    });
+  }
+
   function startMusic() {
     if (!init()) return;
     resume();
     if (musicTimer) return;
+    loadMusic();
+    if (startLoop()) return;      /* поехали с mp3 */
+    /* пока mp3 едет — стартуем секвенсор, он же останется запасным */
     musicStep = 0;
     musicNextTime = ctx.currentTime + 0.1;
     musicTimer = setInterval(schedule, 40);
@@ -257,12 +384,15 @@
 
   function stopMusic() {
     if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+    stopLoop();
   }
 
   root.SND = {
-    init: init, resume: resume, play: play,
+    init: init, resume: resume, play: play, meow: meow,
     get enabled() { return sfxOn; },
     set enabled(v) { sfxOn = !!v; },
+    get usingFiles() { return !!musicBuf || Object.keys(buffers).length > 0; },
+    get loaded() { return Object.keys(buffers); },
     get music() { return musicOn; },
     set music(v) {
       musicOn = !!v;

@@ -465,6 +465,191 @@
   };
 
   /* ============================================================
+     КАРТИНКИ ИЗ РЕПОЗИТОРИЯ
+     ------------------------------------------------------------
+     Скины и предметы — настоящие PNG из orca-clicker. Чтобы не
+     спорить с пиксель-артом сцены, каждая картинка один раз
+     «пережимается» в маленькую сетку пикселей с палитрой из
+     N самых частых цветов — получается честный спрайт, который
+     дальше масштабируется nearest-neighbour как все остальные.
+     ============================================================ */
+  var IMAGES = {
+    /* скины (кошки) */
+    img_normal: { src: 'img/skins/normal.png', h: 34, maxW: 40, colors: 16 },
+    img_chillcat: { src: 'img/skins/CHILLCAT.png', h: 36, maxW: 40, colors: 16 },
+    img_hiding: { src: 'img/skins/cat_hiding.png', h: 34, maxW: 36, colors: 16 },
+    img_beauty: { src: 'img/skins/beauty_cat.png', h: 36, maxW: 40, colors: 16 },
+    img_wild: { src: 'img/skins/wild_cat.png', h: 36, maxW: 36, colors: 16 },
+    img_interesting: { src: 'img/skins/interesting.png', h: 36, maxW: 40, colors: 16 },
+    img_cyberpunk: { src: 'img/skins/skin_cyberpunk.png', h: 34, maxW: 40, colors: 16 },
+    img_cute: { src: 'img/skins/cute.png', h: 36, maxW: 40, colors: 16 },
+    img_bugeyed: { src: 'img/skins/bug-eyed.png', h: 36, maxW: 40, colors: 16 },
+    img_chonky: { src: 'img/skins/a-bit-chonky.png', h: 36, maxW: 44, colors: 16 },
+    img_richi: { src: 'img/skins/richi.png', h: 36, maxW: 40, colors: 16 },
+    /* предметы */
+    img_chest: { src: 'img/items/bonus.png', h: 14, maxW: 16, colors: 12 },
+    img_fish: { src: 'img/items/fish.png', h: 16, maxW: 18, colors: 12 },
+    img_catdrop: { src: 'img/items/catdrop.png', h: 26, maxW: 30, colors: 16 },
+    img_clickup: { src: 'img/items/click_booster.png', h: 8, maxW: 9, colors: 8 },
+    img_autoup: { src: 'img/items/auto_booster.png', h: 8, maxW: 9, colors: 8 }
+  };
+
+  var built = {};          /* имя → canvas с пиксель-копией */
+  var readyCbs = [];
+  var loading = false;
+  var done = false;
+
+  /* Превращает картинку в пиксельный спрайт.
+     Шаг 1 — уменьшаем до рабочего размера и ищем границы непрозрачного
+     содержимого: в исходниках кошка занимает малую часть холста, и без
+     кропа спрайт был бы крошечным пятном в пустоте.
+     Шаг 2 — сетка берётся по пропорциям самого кропа, иначе строки
+     дублируются и картинка «мылится».
+     Шаг 3 — палитра из самых частых цветов, всё притягивается к ней. */
+  var WORK = 128;   /* сторона рабочего холста, px */
+
+  function squeeze(img, spec) {
+    var s = Math.min(1, WORK / Math.max(img.width, img.height));
+    var dw = Math.max(1, Math.round(img.width * s));
+    var dh = Math.max(1, Math.round(img.height * s));
+    var off = document.createElement('canvas');
+    off.width = dw; off.height = dh;
+    var oc = off.getContext('2d');
+    oc.imageSmoothingEnabled = true;
+    oc.imageSmoothingQuality = 'high';
+    oc.drawImage(img, 0, 0, dw, dh);
+    var src = oc.getImageData(0, 0, dw, dh).data;
+
+    /* 1. границы содержимого */
+    var bx0 = dw, by0 = dh, bx1 = -1, by1 = -1;
+    for (var cy = 0; cy < dh; cy++) {
+      var rowBase = cy * dw * 4;
+      for (var cx = 0; cx < dw; cx++) {
+        if (src[rowBase + cx * 4 + 3] < 24) continue;
+        if (cx < bx0) bx0 = cx;
+        if (cx > bx1) bx1 = cx;
+        if (cy < by0) by0 = cy;
+        if (cy > by1) by1 = cy;
+      }
+    }
+    if (bx1 < 0) { bx0 = 0; by0 = 0; bx1 = dw - 1; by1 = dh - 1; }
+    /* отступ, чтобы тёмный контур не срезался */
+    var pad = Math.max(1, Math.round(Math.max(bx1 - bx0, by1 - by0) * 0.03));
+    bx0 = Math.max(0, bx0 - pad); by0 = Math.max(0, by0 - pad);
+    bx1 = Math.min(dw - 1, bx1 + pad); by1 = Math.min(dh - 1, by1 + pad);
+    var bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+
+    /* 2. целевая сетка — по пропорциям кропа */
+    var gh = Math.max(4, spec.h);
+    var gw = Math.max(4, Math.min(spec.maxW, Math.round(gh * bw / bh)));
+
+    /* 3. бокс-фильтр: усредняем каждый пиксель целевой сетки */
+    var grid = new Array(gw * gh);
+    var gi = 0;
+    for (var y = 0; y < gh; y++) {
+      var y0 = by0 + Math.floor(y * bh / gh);
+      var y1 = Math.max(y0 + 1, by0 + Math.floor((y + 1) * bh / gh));
+      for (var x = 0; x < gw; x++, gi++) {
+        var x0 = bx0 + Math.floor(x * bw / gw);
+        var x1 = Math.max(x0 + 1, bx0 + Math.floor((x + 1) * bw / gw));
+        var r = 0, g = 0, b = 0, a = 0, n = 0;
+        for (var yy = y0; yy < y1; yy++) {
+          var base = yy * dw * 4;
+          for (var xx = x0; xx < x1; xx++) {
+            var o = base + xx * 4;
+            var al = src[o + 3];
+            /* premultiply: прозрачные пиксели не тянут цвет вниз */
+            r += src[o] * al; g += src[o + 1] * al; b += src[o + 2] * al;
+            a += al; n++;
+          }
+        }
+        if (a < n * 90) { grid[gi] = null; continue; }
+        grid[gi] = [Math.round(r / a), Math.round(g / a), Math.round(b / a)];
+      }
+    }
+
+    /* 2. палитра: самые частые цвета, все клетки притягиваются к ней */
+    var hist = Object.create(null);
+    for (var i = 0; i < grid.length; i++) {
+      var c = grid[i];
+      if (!c) continue;
+      var key = (c[0] >> 4) * 256 + (c[1] >> 4) * 16 + (c[2] >> 4);
+      hist[key] = (hist[key] || 0) + 1;
+    }
+    var pal = Object.keys(hist)
+      .map(function (k) { return { k: +k, n: hist[k] }; })
+      .sort(function (a, b) { return b.n - a.n; })
+      .slice(0, spec.colors || 16)
+      .map(function (o) {
+        var q = o.k;
+        return [((q >> 8) & 15) * 17, ((q >> 4) & 15) * 17, (q & 15) * 17];
+      });
+    if (!pal.length) pal = [[255, 255, 255]];
+
+    /* 3. рисуем */
+    var cv = document.createElement('canvas');
+    cv.width = gw; cv.height = gh;
+    var cx = cv.getContext('2d');
+    var out = cx.createImageData(gw, gh);
+    var od = out.data;
+    for (var g2 = 0; g2 < grid.length; g2++) {
+      var cc = grid[g2];
+      var p = g2 * 4;
+      if (!cc) { od[p + 3] = 0; continue; }
+      var best = pal[0], bd = Infinity;
+      for (var k = 0; k < pal.length; k++) {
+        var dr = cc[0] - pal[k][0], dg = cc[1] - pal[k][1], db = cc[2] - pal[k][2];
+        var d = dr * dr + dg * dg + db * db;
+        if (d < bd) { bd = d; best = pal[k]; }
+      }
+      od[p] = best[0]; od[p + 1] = best[1]; od[p + 2] = best[2]; od[p + 3] = 255;
+    }
+    cx.putImageData(out, 0, 0);
+    return cv;
+  }
+
+  function loadImages() {
+    if (loading || done) return;
+    if (typeof Image === 'undefined' || !document) { done = true; fire(); return; }
+    loading = true;
+    var names = Object.keys(IMAGES);
+    var left = names.length;
+    if (!left) { done = true; fire(); return; }
+    function one() {
+      if (--left > 0) return;
+      loading = false; done = true;
+      fire();
+    }
+    for (var i = 0; i < names.length; i++) {
+      (function (name) {
+        var spec = IMAGES[name];
+        var img = new Image();
+        img.onload = function () {
+          try { built[name] = squeeze(img, spec); } catch (e) { built[name] = null; }
+          one();
+        };
+        img.onerror = function () { built[name] = null; one(); };
+        img.src = spec.src;
+      })(names[i]);
+    }
+  }
+
+  function fire() {
+    /* перерисовать уже вставленные <canvas> — до этого могли отрисоваться фолбэки */
+    var all = document.querySelectorAll ? document.querySelectorAll('canvas[data-spr]') : [];
+    for (var i = 0; i < all.length; i++) delete all[i].dataset.painted;
+    for (var j = 0; j < readyCbs.length; j++) {
+      try { readyCbs[j](); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function onReady(fn) {
+    if (done) { try { fn(); } catch (e) { /* ignore */ } return; }
+    readyCbs.push(fn);
+  }
+  function isImage(name) { return Object.prototype.hasOwnProperty.call(IMAGES, name); }
+
+  /* ============================================================
      РЕНДЕР
      ============================================================ */
 
@@ -531,6 +716,16 @@
   }
 
   function get(name, palKey, outline) {
+    /* картинка из репозитория: палитра и контур не применяются */
+    if (isImage(name)) {
+      var hit = built[name];
+      if (hit) return hit;
+      /* ещё грузится или не загрузилась — временно показываем ASCII-заглушку */
+      return ascii(name, 'i_star', true);
+    }
+    return ascii(name, palKey, outline);
+  }
+  function ascii(name, palKey, outline) {
     var key = name + '|' + (palKey || '-') + '|' + (outline ? 1 : 0);
     if (cache[key]) return cache[key];
     var rows = SPRITES[name];
@@ -607,6 +802,11 @@
     BASE: BASE,
     SPRITES: SPRITES,
     SKIN_PAL: SKIN_PAL,
+    IMAGES: IMAGES,
+    loadImages: loadImages,
+    onReady: onReady,
+    get isReady() { return done; },
+    isImage: isImage,
     get: get,
     draw: draw,
     drawTinted: drawTinted,

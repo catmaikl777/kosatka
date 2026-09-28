@@ -116,6 +116,10 @@ class El {
   }
   get id() { return this.attrs.id || ''; }
   set id(v) { this.attrs.id = v; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  hasAttribute(k) { return k in this.attrs; }
+  removeAttribute(k) { delete this.attrs[k]; }
   get className() { return this.classList.toString(); }
   set className(v) { this.classList.s = new Set(String(v).split(/\s+/).filter(Boolean)); }
   get children() { return this.childNodes.filter(n => n instanceof El); }
@@ -288,8 +292,8 @@ function makeClient(label) {
       const noop = () => {};
       return {
         currentTime: 0, state: 'running', destination: {},
-        createOscillator: () => ({ frequency: { value: 440, setValueAtTime: noop }, connect: noop, start: noop, stop: noop }),
-        createGain: () => ({ gain: { value: 0, setValueAtTime: noop, linearRampToValueAtTime: noop, exponentialRampToValueAtTime: noop }, connect: noop }),
+        createOscillator: () => ({ frequency: { value: 440, setValueAtTime: noop, linearRampToValueAtTime: noop, exponentialRampToValueAtTime: noop, setTargetAtTime: noop }, connect: noop, start: noop, stop: noop }),
+        createGain: () => ({ gain: { value: 0, setValueAtTime: noop, linearRampToValueAtTime: noop, exponentialRampToValueAtTime: noop, setTargetAtTime: noop }, connect: noop }),
         createBiquadFilter: () => ({ frequency: { value: 800, setValueAtTime: noop }, connect: noop }),
         resume: () => Promise.resolve(), close: () => Promise.resolve()
       };

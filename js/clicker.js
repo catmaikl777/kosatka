@@ -100,14 +100,25 @@
 
   /* ---------- бонусы на поле ---------- */
   function spawnBonus() {
-    var pool = D.FIELD_BONUSES.slice();
-    var type = pool[Math.floor(Math.random() * pool.length)];
+    var pool = D.FIELD_BONUSES;
+    /* удача сдвигает вес к концу списка (там rarer-бонусы) */
+    var shift = Math.min(0.75, (ST.luck() - 1) * 0.9);
+    var i = 0;
+    for (var j = 0; j < pool.length; j++) {
+      i += pool[j].w * (1 + shift * j / (pool.length - 1));
+    }
+    var r = Math.random() * i, type = pool[pool.length - 1];
+    var acc = 0;
+    for (var k = 0; k < pool.length; k++) {
+      acc += pool[k].w * (1 + shift * k / (pool.length - 1));
+      if (r <= acc) { type = pool[k]; break; }
+    }
     var w = canvas.width, h = canvas.height;
     bonusList.push({
       type: type,
       x: 60 + Math.random() * (w - 120),
       y: h * 0.18 + Math.random() * (h * 0.5),
-      r: 30,
+      r: 34,
       born: Date.now(),
       life: 9000,
       ph: Math.random() * 6.28
@@ -115,30 +126,49 @@
     root.FX.pulseBonus();
   }
 
+  /* ---------- бонусы на поле ----------
+     Награды «живые»: сундук и рыба считаются от текущего дохода,
+     поэтому дорогая стая собирает с поля заметно больше. */
   function collectBonus(b, x, y) {
     var i = bonusList.indexOf(b);
     if (i >= 0) bonusList.splice(i, 1);
-    var s = ST.state.stats;
-    var gained = 0;
-    if (b.type.id === 'x2') {
-      buffX2 = Date.now() + b.type.dur;
+    var t = b.type;
+    var label = '';
+    var pc = ST.perClick(root.CLICK.combo);
+    var ps = ST.perSecond();
+
+    if (t.id === 'x2') {
+      buffX2 = Date.now() + t.dur;
       ST.state.boostUntil = Math.max(ST.state.boostUntil, buffX2);
-      UI.banner('x2 ДОХОД 30 СЕК', 'banner-good', 1200);
-    } else if (b.type.id === 'rain') {
-      buffRain = Date.now() + b.type.dur;
-      UI.banner('ДОЖДЬ x3 15 СЕК', 'banner-good', 1200);
-    } else if (b.type.id === 'storm') {
-      buffStorm = Date.now() + b.type.dur;
-      UI.banner('ШТОРМ КРИТОВ', 'banner-good', 1200);
-    } else if (b.type.id === 'school') {
-      ST.addFish(5);
-      UI.banner('+5 РЫБ', 'banner-good', 900);
-    } else if (b.type.id === 'shell') {
-      ST.addShells(1);
-      UI.banner('+1 РАКУШКА', 'banner-good', 900);
+      label = 'ДОХОД x2 · ' + Math.round(t.dur / 1000) + ' сек';
+    } else if (t.id === 'rain') {
+      buffRain = Date.now() + t.dur;
+      label = 'ДОЖДЬ x1.5 · ' + Math.round(t.dur / 1000) + ' сек';
+    } else if (t.id === 'storm') {
+      buffStorm = Date.now() + t.dur;
+      label = 'ШТОРМ КРИТОВ · ' + Math.round(t.dur / 1000) + ' сек';
+    } else if (t.id === 'chest') {
+      var cash = Math.floor(pc * t.times);
+      ST.addCoins(cash, true);
+      label = '+' + ST.fmt(cash) + ' косаток';
+    } else if (t.id === 'fish') {
+      /* рыба падает только если окупается: иначе она слабее сундука */
+      var worth = Math.max(ps * 30, pc * 10);
+      var n = Math.max(1, Math.floor(worth / Math.max(1, ST.fishValue())));
+      ST.addFish(n);
+      label = '+' + n + ' рыб';
+    } else if (t.id === 'shell') {
+      ST.addShells(t.v || 1);
+      label = '+' + (t.v || 1) + ' ракушка';
+    } else {
+      return;
     }
+
+    ST.state.stats.bonuses++;
+    ST.bump('bonuses');
+    UI.banner(label, 'banner-good', 1200);
     root.SND.play('bonus');
-    root.FX.bonusFx(b.type.color, x || b.x, y || b.y);
+    root.FX.bonusFx(t.color, x || b.x, y || b.y);
     ST.save();
   }
 

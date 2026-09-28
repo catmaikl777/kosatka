@@ -25,6 +25,7 @@ const css = read('css/pixel.css');
 const jsFiles = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js')).sort();
 const src = Object.fromEntries(jsFiles.map(f => [f, read('js/' + f)]));
 const all = Object.values(src).join('\n');
+const sprites = src['sprites.js'] || '';
 
 console.log('\n\x1b[1mPIXEL ORCA — проверка клиента\x1b[0m\n');
 
@@ -211,6 +212,29 @@ const dailyLen = (data.match(/DAILY_REWARD\s*=\s*\[([\s\S]*?)\n {2}\];/) || [, '
 const dailyCount = (dailyLen.match(/\{/g) || []).length;
 if (dailyCount >= 7) ok(`ежедневных наград ${dailyCount} дней (сетка рассчитана на 4 колонки)`);
 else wn(`ежедневных наград всего ${dailyCount} — стоит расширить до 7`);
+
+/* 13. бинарные ассеты, на которые ссылается код, реально лежат в репозитории */
+const assetRefs = new Set();
+for (const m of all.matchAll(/['"]((?:img|audio)\/[A-Za-z0-9_\-/.]+)['"]/g)) assetRefs.add(m[1]);
+/* фоны подключаются через url() в CSS — их тоже надо проверить */
+for (const m of css.matchAll(/url\(['"]?([^'")]+)['"]?\)/g)) {
+  const u = m[1].replace(/^\.\.\//, '');   /* в css пути от css/pixel.css */
+  if (/^(img|audio)\//.test(u)) assetRefs.add(u);
+}
+const missingAssets = [...assetRefs].filter(p => !fs.existsSync(path.join(ROOT, p)));
+if (missingAssets.length) no('отсутствуют файлы ассетов: ' + missingAssets.join(', '));
+else ok(`все ${assetRefs.size} файлов картинок и звуков на месте`);
+
+/* 14. спрайты из PO_SPR.IMAGES реально зарегистрированы, и наоборот */
+const imgSpecs = [...sprites.matchAll(/(\w+):\s*\{ src: '([^']+)'/g)];
+const registered = new Set(imgSpecs.map(m => m[1]));
+const dataArtKeys = new Set([...data.matchAll(/art: '(\w+)'/g)].map(m => m[1]));
+const artUnknown = [...dataArtKeys].filter(k => !registered.has(k));
+if (artUnknown.length) no('скины ссылаются на незарегистрированные спрайты: ' + artUnknown.join(', '));
+else ok(`все ${dataArtKeys.size} картинок скинов зарегистрированы в PO_SPR.IMAGES`);
+const missingImgFiles = imgSpecs.filter(m => !fs.existsSync(path.join(ROOT, m[2]))).map(m => m[2]);
+if (missingImgFiles.length) no('нет файлов для спрайтов: ' + missingImgFiles.join(', '));
+else ok(`все ${imgSpecs.length} спрайтов-картинок имеют файлы`);
 
 console.log('');
 if (bad) { console.log(`  \x1b[31mПроблем: ${bad}\x1b[0m, предупреждений: ${warn}`); process.exit(1); }

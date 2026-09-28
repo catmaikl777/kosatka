@@ -29,7 +29,7 @@ for (let i = 0; i < args.length; i++) {
 
 /* что уезжает на Pages: только браузерные файлы, без сервера и тестов */
 const INCLUDE_FILES = ['index.html', 'sw.js', 'manifest.webmanifest', '.nojekyll', 'CNAME', 'robots.txt'];
-const INCLUDE_DIRS = ['css', 'js', 'img'];
+const INCLUDE_DIRS = ['css', 'js', 'img', 'audio'];
 
 const OUT = path.resolve(ROOT, flags.out || positional[1] || 'dist');
 const SERVER_URL = String(

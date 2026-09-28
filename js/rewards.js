@@ -133,7 +133,7 @@
       html += '<p class="dialog-text">Билеты обмениваются в клане на очки сезона. Чем больше очков у клана, тем выше его место в наградах.</p>' +
         '<div class="clan-evt">' +
         '<button class="px-btn px-btn-small px-btn-primary" id="evExchange">🎫 ОБМЕНЯТЬ 10 БИЛЕТОВ → 100 ОЧКОВ</button>' +
-        (api.clan ? '' : '<span class="dim">нужен клан</span>') +
+        (ST.state.clan ? '' : '<span class="dim">нужен клан</span>') +
         '</div>';
       html += '<div class="ev-rewards"><h4>Топ игроков</h4>' +
         '<div class="ev-line ev-1">🥇 1 место: ' + ST.fmt(D.EVENT.playerRewards[0]) + '</div>' +

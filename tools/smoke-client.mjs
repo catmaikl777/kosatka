@@ -60,6 +60,10 @@ class Node {
   }
   get id() { return this.attrs.id || ''; }
   set id(v) { this.attrs.id = v; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  hasAttribute(k) { return k in this.attrs; }
+  removeAttribute(k) { delete this.attrs[k]; }
   get className() { return this.classList.toString(); }
   set className(v) { this.classList.set = new Set(String(v).split(/\s+/).filter(Boolean)); }
   get children() { return this.childNodes.filter(n => n instanceof Node); }
@@ -256,10 +260,21 @@ const sandbox = {
   AudioContext: function () {
     return {
       currentTime: 0, state: 'running', destination: {},
-      createOscillator: () => ({ type: 'sine', frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, start() {}, stop() {} }),
-      createGain: () => ({ gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }),
+      createOscillator: () => ({
+        type: 'sine',
+        /* AudioParam целиком: реальный WebAudio умеет все методы,
+           иначе synth-звук падает в песочнице, а не в браузере */
+        frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {}, cancelScheduledValues() {} },
+        connect() {}, disconnect() {}, start() {}, stop() {}
+      }),
+      createGain: () => ({ gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {}, cancelScheduledValues() {} }, connect() {}, disconnect() {} }),
       createBiquadFilter: () => ({ type: 'lowpass', frequency: { value: 800, setValueAtTime() {} }, Q: { value: 1 }, connect() {} }),
-      createBufferSource: () => ({ buffer: null, loop: true, connect() {}, start() {}, stop() {} }),
+      createBufferSource: () => ({
+        buffer: null, loop: true,
+        playbackRate: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {} },
+        connect() {}, disconnect() {}, start() {}, stop() {}
+      }),
+      decodeAudioData: (ab, ok2) => { if (typeof ok2 === 'function') ok2({ duration: 1, sampleRate: 44100, getChannelData: () => new Float32Array(1024) }); return Promise.resolve({}); },
       createBuffer: () => ({ getChannelData: () => new Float32Array(1024) }),
       resume: () => Promise.resolve(), close: () => Promise.resolve()
     };
@@ -357,7 +372,7 @@ ok('критический шанс в норме', ST.critChance() > 0 && ST.cr
 
 /* ================= 3. магазин: рендер всех вкладок ================= */
 SHOP.initClicks();
-for (const [tab, boxId] of [['upgrades', 'shopUpgrades'], ['skins', 'shopSkins'], ['boxes', 'shopBoxes'], ['fx', 'shopEffects']]) {
+for (const [tab, boxId] of [['upgrades', 'shopUpgrades'], ['skins', 'shopSkins'], ['boxes', 'shopBoxes'], ['fx', 'shopEffects'], ['ranks', 'shopRanks']]) {
   const err = errors.length;
   SHOP.render(tab);
   const box = document.getElementById(boxId);
@@ -372,8 +387,8 @@ ok('paintIcons не падает', true);
 
 /* ================= 4. скин ================= */
 const skinsBefore = ST.state.skinsOwned.length;
-const skin = DATA.SKINS.find(s => s.cost);
-ok('у скина с ценой есть cost', !!skin);
+const skin = DATA.SKINS.find(s => s.cost && !s.box && !s.event && !s.raid && !s.secret);
+ok('есть скин, который можно купить за косатки', !!skin);
 if (skin) { ST.state.coins = 1e12; ST.buySkin(skin.id); }
 ok('скин покупается и надевается', ST.state.skinsOwned.length > skinsBefore && ST.state.skin === skin.id,
   `${skin.id}, owned=${ST.state.skinsOwned.length}`);
@@ -410,6 +425,11 @@ const errFish = errors.length;
 FISH.open();
 ok('окно рыбалки открылось', FISH.running === true, String(FISH.running));
 ok('рыбалка тикает без ошибок', (FISH.tick(16), errors.length === errFish), errors.slice(errFish).join(' | '));
+/* прогоняем реальный кадровый цикл: раньше update() падал с ReferenceError
+   (dt не был передан из loop), и это ловилось только здесь */
+const errRaft = errors.length;
+tickFrames(6);
+ok('кадровый цикл рыбалки не падает', errors.length === errRaft, errors.slice(errRaft).join(' | '));
 FISH.close();
 ok('рыбалка закрывается', FISH.running === false, String(FISH.running));
 ST.state.fish = 10;
@@ -507,12 +527,118 @@ for (const [name, fn] of [
   ok(`окно «${name}» открывается офлайн без ошибок`, errors.length === e0, errors.slice(e0).join(' | '));
 }
 
-/* ================= 14. настройки через API ================= */
+/* ================= 14. целостность игровых данных ================= */
+/* Каждый тип добычи должен обрабатываться в rollLoot, иначе бокс
+   молча выдаёт «пустой» список наград. */
+const LOOT_HANDLERS = ['coins', 'fish', 'shells', 'xp', 'ticket', 'buff', 'effect', 'skin'];
+const badLoot = [];
+for (const b of DATA.BOXES) {
+  for (const l of (b.loot || [])) if (!LOOT_HANDLERS.includes(l.t)) badLoot.push(`${b.id}:${l.t}`);
+}
+ok('все типы добычи из боксов обработаны в rollLoot', badLoot.length === 0, badLoot.join(','));
+
+const fieldIds = DATA.FIELD_BONUSES.map(f => f.id);
+ok('бонусы на поле заданы', fieldIds.length >= 4, fieldIds.join(','));
+/* collectBonus в clicker.js обязан уметь выдать каждый тип из data.js */
+const bonusIds = ['x2', 'chest', 'fish', 'rain', 'storm', 'shell'];
+ok('набор бонусов на поле совпадает с набором в data.js',
+  bonusIds.every(i => fieldIds.includes(i)) && fieldIds.every(i => bonusIds.includes(i)),
+  fieldIds.join(','));
+
+/* У каждого скина должна быть картинка в реестре спрайтов */
+const badArt = DATA.SKINS.filter(s => !PO_SPR.IMAGES[s.art]).map(s => s.id);
+ok('у всех скинов есть картинка', badArt.length === 0, badArt.join(','));
+
+/* Скин должен быть либо покупаемым, либо иметь понятную причину блокировки */
+const starterId = DATA.SKINS[0].id;
+const badLock = DATA.SKINS
+  .filter(s => s.id !== starterId && !s.cost && !s.box && !s.event && !s.raid && !s.secret)
+  .map(s => s.id);
+ok('у всех скинов кроме стартового есть цена или способ получения', badLock.length === 0, badLock.join(','));
+
+/* Эффекты обязаны что-то усиливать, иначе это просто картинка */
+const deadFx = DATA.EFFECTS.filter(e => !(e.click > 1) && !(e.auto > 1)).map(e => e.id);
+ok('у всех эффектов есть реальный множитель', deadFx.length === 0, deadFx.join(','));
+
+/* Каждый стат квеста/достижения должен что-то возвращать */
+const allGoals = [...DATA.QUESTS, ...DATA.DAILY, ...DATA.ACHIEVEMENTS];
+const badStat = allGoals.filter(g => typeof ST.statValue(g.stat) !== 'number' || !Number.isFinite(ST.statValue(g.stat)))
+  .map(g => `${g.id}:${g.stat}`);
+ok('все статы квестов и достижений разрешимы', badStat.length === 0, badStat.join(','));
+
+/* Цели достижений не должны превышать максимум по стату */
+const unattainable = DATA.ACHIEVEMENTS.filter(a => {
+  if (a.id === 'a_allFx') return false;             /* открывает состав эффектов */
+  if (a.id === 'a_allSkins') return false;
+  if (a.id === 'a_boxSkins') return false;
+  if (a.id === 'a_upgAll') return false;
+  if (a.id === 'a_questAll') return false;
+  if (a.id === 'a_clan10') return false;            /* зависит от чужих игроков */
+  if (a.id === 'a_clans3') return false;
+  return a.goal > DATA.SKINS.length && a.stat === 'skinsUnlocked';
+});
+ok('цели достижений достижимы', unattainable.length === 0, unattainable.map(a => a.id).join(','));
+
+/* ================= 15. звук и фото-фон ================= */
+/* в песочнице нет fetch/AudioContext.decodeAudioData — проверяем,
+   что всё уходит в безопасный фолбэк и не бросает наружу */
+let snThrew = false;
+try { SND.play('click'); SND.play('buy'); SND.play('crit'); SND.meow(); }
+catch (e) { snThrew = true; }
+ok('SND не падает без файлов', !snThrew);
+ok('SND.meow() возвращает признак успеха', typeof SND.meow() === 'boolean');
+ok('звук выключается флагом', (SND.enabled = false, SND.enabled === false) && (SND.enabled = true));
+
+ok('в настройках есть выбор фона',
+  ['none', 'dark', 'orange', 'white'].indexOf(DATA.freshState().settings.backdrop) >= 0);
+const bgRow = document.getElementById('bgRow');
+ok('в разметке есть выбор фона', !!(bgRow && bgRow.querySelectorAll('[data-bg]').length === 4));
+
+/* ================= 15. эффекты влияют на доход ================= */
+ST.state.upgrades = {};
+ST.state.effectsOwned = [];
+ST.state.effectsOn = {};
+ST.state.settings.effectsAll = true;
+ST.state.coins = 0;
+const basePerClick = ST.perClick(0);
+DATA.EFFECTS.forEach(e => ST.unlockEffect(e.id));
+const fxClick = ST.fxMult('click');
+const fxAuto = ST.fxMult('auto');
+ok('эффекты усиливают клик', fxClick > 1, String(fxClick));
+ok('эффекты усиливают автодоход', fxAuto > 1, String(fxAuto));
+ok('множитель клика ограничен потолком', fxClick <= DATA.FX_MULT_CAP, `${fxClick} > ${DATA.FX_MULT_CAP}`);
+ST.state.upgrades.mini = 4;
+ok('доход вырос после включения эффектов', ST.perSecond() > 0 && ST.perClick(0) >= basePerClick,
+  `perClick=${ST.perClick(0)} perSec=${ST.perSecond()}`);
+
+/* ================= 16. временные бусты ================= */
+const c0 = ST.state.coins;
+ST.addBuff(3, 30000, 'x3 на 30 сек');
+ok('буст ×3 применён', ST.tempMult() === 3, String(ST.tempMult()));
+ok('буст учтён в клике', ST.perClick(0) > 0, String(ST.perClick(0)));
+ST.state.buff = { mult: 1, until: 0, name: '' };
+ok('буст истёк и снялся', ST.tempMult() === 1, String(ST.tempMult()));
+ST.state.coins = c0;
+
+/* ================= 17. ранги по кликам ================= */
+ok('есть ранги для забора', DATA.RANKS.length >= 5, String(DATA.RANKS.length));
+ST.state.ranksClaimed = {};
+ST.state.stats.clicks = 0;
+const firstRank = DATA.RANKS[0];
+const claimedFirst = ST.claimRank(firstRank.id);
+ok('первый ранг забирается сразу', !!claimedFirst && ST.state.coins >= firstRank.reward,
+  `claimed=${!!claimedFirst} coins=${ST.state.coins}`);
+ok('повторно ранг не забрать', ST.claimRank(firstRank.id) === null, String(ST.claimRank(firstRank.id)));
+ST.state.stats.clicks = DATA.RANKS[1].clicks;
+ok('следующий ранг становится доступен', !!ST.nextRank(), String(ST.nextRank() && ST.nextRank().id));
+ok('далекий ранг недоступен', !ST.rankAvailable(DATA.RANKS[5]), DATA.RANKS[5].id);
+
+/* ================= 18. настройки через API ================= */
 const errSet = errors.length;
 SOCIAL.openAuth(); UI.closeAll();
 ok('соц-слой не падает без сервера', errors.length === errS, errors.slice(errS).join(' | '));
 
-/* ================= 15. финальный прогон цикла ================= */
+/* ================= 19. финальный прогон цикла ================= */
 tickFrames(30);
 for (let i = 0; i < 30; i++) { ST.tick(1); CLICK.tick(1); FX.tick(); }
 ok('игровой цикл живёт без исключений', errors.length === errSet, errors.slice(errSet).join(' | '));

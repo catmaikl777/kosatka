@@ -112,13 +112,13 @@
     last = ts;
     timeLeft -= dt;
     if (timeLeft <= 0) { timeLeft = 0; stop(true); }
-    update(ts);
+    update(ts, dt);
     draw();
     requestAnimationFrame(loop);
   }
 
-  function update(ts) {
-    spawnT -= dt / 1000 * 1000;
+  function update(ts, dt) {
+    spawnT -= dt;
     if (spawnT <= 0) {
       spawn();
       spawnT = 420 + Math.random() * 520;

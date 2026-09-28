@@ -98,12 +98,40 @@
     var b = root.API && root.API.clanBonus ? root.API.clanBonus() : 0;
     return 1 + b;
   }
-  function boostMult() {
+
+  /* ---------- множители визуальных эффектов ----------
+     Эффекты реально влияют на клик и автодоход — иначе это просто
+    装饰 пиксели. Множители перемножаются между собой, итог ограничен. */
+  function fxMult(kind) {
     var m = 1;
-    if (state.boostUntil > Date.now()) m *= 2;
-    if (state.rainUntil > Date.now()) m *= 1.5;   /* дождевой бафф (ивент) */
+    for (var i = 0; i < D.EFFECTS.length; i++) {
+      var e = D.EFFECTS[i];
+      if (!effectOn(e.id)) continue;
+      var v = kind === 'auto' ? e.auto : e.click;
+      if (v && v > 1) m *= v;
+    }
+    return Math.min(m, D.FX_MULT_CAP);
+  }
+
+  /* временный буст: из бокса или с поля. Берём сильнейший, а не перемножаем. */
+  function tempMult() {
+    var now = Date.now(), m = 1;
+    if (state.boostUntil > now) m = Math.max(m, 2);
+    if (state.rainUntil > now) m = Math.max(m, 1.5);
+    if (state.buff && state.buff.until > now && state.buff.mult > 1) m = Math.max(m, state.buff.mult);
     return m;
   }
+  function addBuff(mult, dur, name) {
+    var until = Date.now() + dur;
+    if (!state.buff.until || state.buff.until < until || state.buff.mult <= mult) {
+      state.buff = { mult: mult, until: until, name: name || ('x' + mult) };
+    }
+    save();
+    emit('buff', state.buff);
+    return state.buff;
+  }
+  function boostMult() { return tempMult(); }
+
   function allMult() {
     return levelMult() * shellMult() * clanMult() * Math.pow(1.03, up('tide'));
   }
@@ -113,12 +141,13 @@
     var mult = Math.pow(1.4, up('power')) * Math.pow(1.35, up('claw'));
     var v = flat * mult * allMult() * (1 + skinBonus());
     v *= comboMult(combo);
+    v *= fxMult('click');
     v *= boostMult();
     return v;
   }
   function perSecond() {
     var cps = up('mini') * 0.5 + up('hunter') * 2 + up('drone') * 8 + up('fleet') * 30;
-    return cps * allMult() * (1 + skinBonus()) * boostMult();
+    return cps * allMult() * (1 + skinBonus()) * fxMult('auto') * boostMult();
   }
   function comboMult(combo) {
     if (!combo) combo = root.CLICK ? root.CLICK.combo : 0;
@@ -144,8 +173,29 @@
     return Math.floor(60 * Math.pow(level, 1.55));
   }
   function rank() {
-    var r = D.RANKS[0].name;
-    for (var i = 0; i < D.RANKS.length; i++) if (state.level >= D.RANKS[i].lvl) r = D.RANKS[i].name;
+    var r = D.TITLES[0].name;
+    for (var i = 0; i < D.TITLES.length; i++) if (state.level >= D.TITLES[i].lvl) r = D.TITLES[i].name;
+    return r;
+  }
+
+  /* ---------- ранг по числу кликов ---------- */
+  function rankInfo(id) {
+    for (var i = 0; i < D.RANKS.length; i++) if (D.RANKS[i].id === id) return D.RANKS[i];
+    return null;
+  }
+  function rankClaimed(id) { return !!state.ranksClaimed[id]; }
+  function rankAvailable(r) { return !!r && state.stats.clicks >= r.clicks && !state.ranksClaimed[r.id]; }
+  function nextRank() {
+    for (var i = 0; i < D.RANKS.length; i++) if (!state.ranksClaimed[D.RANKS[i].id]) return D.RANKS[i];
+    return null;
+  }
+  function claimRank(id) {
+    var r = rankInfo(id);
+    if (!rankAvailable(r)) return null;
+    state.ranksClaimed[id] = 1;
+    ST.addCoins(r.reward, true);
+    save();
+    emit('rank', r);
     return r;
   }
 
@@ -189,7 +239,7 @@
   function buySkin(id) {
     var s = skin(id);
     if (!s || state.skinsOwned.indexOf(id) >= 0) return false;
-    if (s.box || s.event || s.raid || s.prestige) return false;
+    if (s.box || s.event || s.raid || s.secret) return false;
     if (state.coins < s.cost) return false;
     state.coins -= s.cost;
     state.skinsOwned.push(id);
@@ -211,6 +261,8 @@
     if (state.skinsOwned.indexOf(id) >= 0) return false;
     state.skinsOwned.push(id);
     bump('skinsUnlocked');
+    var s = skin(id);
+    if (s && s.box) bump('boxSkins');
     save();
     emit('unlock', 'skin:' + id);
     return true;
@@ -228,8 +280,12 @@
     return true;
   }
   function hasEffect(id) { return state.effectsOwned.indexOf(id) >= 0; }
+  /* Отсутствующий ключ в effectsOn считаем включённым: иначе новый эффект,
+     добавленный в data.js, молча ничего не будет делать. */
   function effectOn(id) {
-    return state.settings.effectsAll && state.effectsOn[id] && hasEffect(id);
+    if (!state.settings.effectsAll) return false;
+    if (!hasEffect(id)) return false;
+    return state.effectsOn[id] !== 0 && state.effectsOn[id] !== false;
   }
 
   function addCoins(n, xpskip) {
@@ -314,7 +370,6 @@
     state.level = 1;
     state.upgrades = {};
     addShells(gain);
-    if (D.SKINS.some(function (s) { return s.prestige; })) unlockSkin('ancient');
     state.questIndex = Math.min(state.questIndex, D.QUESTS.length - 1);
     save();
     emit('prestige', gain);
@@ -347,8 +402,23 @@
       case 'totalCoins': return state.totalCoins;
       case 'bestCps': return state.stats.bestCps;
       case 'bestPerClick': return state.stats.bestPerClick;
-      case 'clicksDaily': return state.dailyProgress.clicksDaily || 0;
-      default: return state.stats[name] || 0;
+      case 'playTime': return state.playTime;
+      case 'questIndex': return state.questIndex;
+      case 'upgradesAll': {
+        var n = 0;
+        for (var i = 0; i < D.UPGRADES.length; i++) if (up(D.UPGRADES[i].id) > 0) n++;
+        return n;
+      }
+      case 'skinsUnlocked': return state.skinsOwned.length;
+      case 'effectsUnlocked': return state.effectsOwned.length;
+      case 'boxSkins': {
+        var c = 0;
+        for (var j = 0; j < D.SKINS.length; j++) {
+          if (D.SKINS[j].box && state.skinsOwned.indexOf(D.SKINS[j].id) >= 0) c++;
+        }
+        return c;
+      }
+      default: return state.dailyProgress[name] != null ? state.dailyProgress[name] : (state.stats[name] || 0);
     }
   }
 
@@ -379,6 +449,10 @@
       state.rainUntil = 0;
       emit('boost-end');
     }
+    if (state.buff && state.buff.until && state.buff.until < now) {
+      state.buff = { mult: 1, until: 0, name: '' };
+      emit('boost-end');
+    }
     if (root.CLICK) root.CLICK.tick(dt);
     if (root.FISH) root.FISH.tick(dt);
     if (root.FX) root.FX.tick(dt);
@@ -394,6 +468,9 @@
     perClick: perClick, perSecond: perSecond, critChance: critChance, critMult: critMult,
     comboMult: comboMult, fishValue: fishValue, luck: luck, xpNeed: xpNeed,
     rank: rank, levelMult: levelMult, shellMult: shellMult, allMult: allMult,
+    fxMult: fxMult, tempMult: tempMult, addBuff: addBuff,
+    rankInfo: rankInfo, rankClaimed: rankClaimed, rankAvailable: rankAvailable,
+    nextRank: nextRank, claimRank: claimRank,
     upgradeCost: upgradeCost, buyUpgrade: buyUpgrade, buyMax: buyMax,
     skin: skin, buySkin: buySkin, equipSkin: equipSkin, unlockSkin: unlockSkin,
     unlockEffect: unlockEffect, hasEffect: hasEffect, effectOn: effectOn,

@@ -17,6 +17,23 @@ const PORT = +(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = process.env.STATIC_DIR ? path.resolve(process.env.STATIC_DIR) : path.resolve(__dirname, '..');
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+
+/* Списки скинов/эффектов/улучшений нужны серверу, чтобы не принимать
+   от клиента выдуманные id. Берём из общей с клиентом data.js. */
+const DATA = (() => {
+  try {
+    require(path.join(__dirname, '..', 'js', 'data.js'));
+    return globalThis.DATA || null;
+  } catch (e) {
+    console.warn('[server] не удалось загрузить js/data.js:', e.message);
+    return null;
+  }
+})();
+/* null = фильтр выключен: если data.js не загрузился, чистить по белому
+   списку нельзя — иначе мы бы снесли чужие скины, а не защитили их. */
+const SKIN_IDS = DATA ? new Set(DATA.SKINS.map(s => s.id)) : null;
+const EFFECT_IDS = DATA ? new Set(DATA.EFFECTS.map(e => e.id)) : null;
+const UPG_IDS = DATA ? new Set(DATA.UPGRADES.map(u => u.id)) : null;
 const DEFAULT_DB_FILE = path.join(DATA_DIR, 'db.json');
 const DB_FILE = process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : DEFAULT_DB_FILE;
 const DB_DIR = path.dirname(DB_FILE);
@@ -88,12 +105,130 @@ function hash(pass, salt) {
   return crypto.pbkdf2Sync(String(pass), salt, 60000, 32, 'sha256').toString('hex');
 }
 function num(v, def) { const n = Number(v); return Number.isFinite(n) ? n : (def || 0); }
+/* Границы честности: клиент присылает свой сейв целиком, поэтому
+   значения нужно зажимать, а не просто проверять размер. */
+const LIMITS = {
+  coins: 1e18, totalCoins: 1e21, fish: 1e15, shells: 1e9, xp: 1e15,
+  level: 5000, boxesOpened: 1e9, prestiges: 1e6, eventTickets: 1e9,
+  eventCoins: 1e15, eventSeasonScore: 1e18, playTime: 1e13
+};
+const MAX_ARR = 64;
+const MAX_KEYS = 64;
+
+function clampNum(v, max) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  return Math.min(n, max);
+}
+function str(v, max) {
+  return typeof v === 'string' ? v.slice(0, max) : '';
+}
+function cleanList(v, allowed) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const x of v) {
+    if (typeof x !== 'string' || out.length >= MAX_ARR) continue;
+    if (allowed && !allowed.has(x)) continue;
+    if (out.indexOf(x) < 0) out.push(x);
+  }
+  return out;
+}
+const MAX_DEPTH = 6;
+const MAX_STR = 200;
+const MAX_NUM = 1e21;
+/* поля, которые чистятся отдельно — их не нужно тащить через deep() */
+const HANDLED = {
+  upgrades: 1, skinsOwned: 1, effectsOwned: 1, skin: 1, effectsOn: 1, buff: 1
+};
+
+/* Глубокая, но ограниченная копия: режет глубину, длины и числа,
+   выкидывает функции и ключи, ведущие в прототип. */
+function deep(v, d) {
+  if (v === null || v === undefined) return null;
+  const t = typeof v;
+  if (t === 'number') return clampNum(v, MAX_NUM);
+  if (t === 'boolean') return v;
+  if (t === 'string') return v.length > MAX_STR ? v.slice(0, MAX_STR) : v;
+  if (t !== 'object') return null;
+  if (d >= MAX_DEPTH) return null;
+  if (Array.isArray(v)) {
+    const out = [];
+    for (let i = 0; i < v.length && i < MAX_ARR; i++) out.push(deep(v[i], d + 1));
+    return out;
+  }
+  const out = {};
+  let n = 0;
+  for (const k in v) {
+    if (n++ >= MAX_KEYS) break;
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+    out[k] = deep(v[k], d + 1);
+  }
+  return out;
+}
+
+/* Приводит присланный сейв к ожидаемой форме: обрезает строки,
+   зажимает числа, выкидывает неизвестные скины/эффекты/улучшения. */
+function cleanState(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+  const o = {};
+  /* 1. Числа, по которым строится лидерборд, зажимаем жёстко. */
+  for (const k in LIMITS) o[k] = clampNum(s[k], LIMITS[k]);
+
+  /* 2. Всё остальное переносим как есть, но с ограничением глубины,
+     длины строк и массивов: клиент сам присылает сейв целиком, а
+     белый список полей стёр бы прогресс при входе с другого устройства. */
+  for (const k in s) {
+    if (k in LIMITS || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (HANDLED[k]) continue;
+    if (!Object.prototype.hasOwnProperty.call(s, k)) continue;
+    o[k] = deep(s[k], 0);
+  }
+
+  /* 3. Поля, за которыми стоит целостность, проверяем по спискам. */
+  o.upgrades = {};
+  if (s.upgrades && typeof s.upgrades === 'object' && !Array.isArray(s.upgrades)) {
+    let n = 0;
+    for (const id in s.upgrades) {
+      if (n++ >= MAX_KEYS) break;
+      if (UPG_IDS && !UPG_IDS.has(id)) continue;
+      o.upgrades[id] = clampNum(s.upgrades[id], 1e6);
+    }
+  }
+  o.skinsOwned = cleanList(s.skinsOwned, SKIN_IDS);
+  if (o.skinsOwned.indexOf('normal') < 0) o.skinsOwned.unshift('normal');
+  o.effectsOwned = cleanList(s.effectsOwned, EFFECT_IDS);
+  o.skin = (!SKIN_IDS || SKIN_IDS.has(s.skin)) ? str(s.skin, 32) : 'normal';
+  if (o.skinsOwned.indexOf(o.skin) < 0) o.skin = 'normal';
+
+  o.effectsOn = {};
+  if (s.effectsOn && typeof s.effectsOn === 'object' && !Array.isArray(s.effectsOn)) {
+    let n = 0;
+    for (const id in s.effectsOn) {
+      if (n++ >= MAX_KEYS) break;
+      if (EFFECT_IDS && !EFFECT_IDS.has(id)) continue;
+      o.effectsOn[id] = s.effectsOn[id] ? 1 : 0;
+    }
+  }
+
+  o.buff = {};
+  if (s.buff && typeof s.buff === 'object' && !Array.isArray(s.buff)) {
+    o.buff = {
+      mult: Math.max(1, Math.min(100, clampNum(s.buff.mult, 100))),
+      until: clampNum(s.buff.until, 1e13),
+      name: str(s.buff.name, 32)
+    };
+  }
+  return o;
+}
+
 function sanitizeState(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
   let json;
   try { json = JSON.stringify(s); } catch (e) { return null; }
-  if (json.length > MAX_SAVE_BYTES) return null;
-  return s;
+  if (!json || json.length > MAX_SAVE_BYTES) return null;
+  return cleanState(s);
 }
 function accPub(a) {
   if (!a) return null;
@@ -697,17 +832,20 @@ function doLeaveLobby(c, l) {
   return send(c, { t: 'pvp:leave:ok', rid: c.lastId });
 }
 function endPvp(l, aborted) {
-  const winA = l.scoreA >= l.scoreB;
+  /* Ничья не должна отдавать победу тому, кто стоит первым в лобби:
+     сравниваем честно и передаём draw отдельным флагом. */
+  const draw = !aborted && Math.floor(l.scoreA) === Math.floor(l.scoreB);
   for (let i = 0; i < 2; i++) {
     const p = l.players[i];
     if (!p || !p.c) continue;
     const mine = i === 0 ? l.scoreA : l.scoreB;
     const theirs = i === 0 ? l.scoreB : l.scoreA;
-    const win = (i === 0 ? winA : !winA);
+    const win = !aborted && !draw && mine > theirs;
+    const reward = aborted ? 0 : Math.floor((win ? 2000 : draw ? 900 : 400) * 10);
     send(p.c, {
-      t: 'pvp:end', you: mine, foe: theirs, win: aborted ? false : win,
+      t: 'pvp:end', you: mine, foe: theirs, win, draw,
       yourClicks: i === 0 ? l.clicksA : l.clicksB,
-      reward: aborted ? 0 : Math.floor((win ? 2000 : 400) * 10)
+      reward
     });
     p.c.lobbyId = null;
   }
@@ -834,15 +972,26 @@ function doLeaveTeam(c, t) {
 function endRaid(t, aborted) {
   const foe = t.foeId ? teams.get(t.foeId) : null;
   const myScore = Math.floor(t.score), foeScore = foe ? Math.floor(foe.score) : 0;
+  /* Раньше первая команда получала win при равенстве, а вторая — нет.
+     Теперь ничья честно отдаётся обоим. */
+  const draw = !aborted && foe && myScore === foeScore;
   for (const p of t.players) {
     if (!p.c) continue;
-    send(p.c, { t: 'raid:end', you: myScore, foe: foeScore, win: aborted ? false : myScore >= foeScore, myClicks: t.clicks });
+    send(p.c, {
+      t: 'raid:end', you: myScore, foe: foeScore,
+      win: !aborted && !draw && myScore > foeScore, draw,
+      myClicks: t.clicks
+    });
     p.c.teamId = null;
   }
   if (foe) {
     for (const p of foe.players) {
       if (!p.c) continue;
-      send(p.c, { t: 'raid:end', you: foeScore, foe: myScore, win: aborted ? false : foeScore > myScore, myClicks: foe.clicks });
+      send(p.c, {
+        t: 'raid:end', you: foeScore, foe: myScore,
+        win: !aborted && !draw && foeScore > myScore, draw,
+        myClicks: foe.clicks
+      });
       p.c.teamId = null;
     }
     foe.foeId = 0; foe.state = 'wait'; foe.endAt = 0;

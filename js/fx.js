@@ -25,7 +25,7 @@
     rainOn = !!on;
     if (rainOn) rainAcc = 0;
   }
-  var orca = { x: 0, y: 0, scale: 4, bob: 0, squash: 0, flip: false };
+  var orca = { x: 0, y: 0, scale: 4, bob: 0, squash: 0, flip: false, w: 18, h: 16, artW: 18, artH: 16 };
   var theme = null, themeKey = 'sunset';
   var enabled = {};
   var stars = [], clouds = [], bubbles = [], flashes = [];
@@ -159,6 +159,9 @@
     resize();
     window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', function () { last = 0; });
+    /* картинки подгружаются асинхронно — пересчитать геометрию, когда они есть */
+    SPR.onReady(function () { resize(); });
+    ST.on(function (type) { if (type === 'skin' || type === 'unlock') relayout(); });
     raf = requestAnimationFrame(frame);
   }
 
@@ -173,9 +176,7 @@
     cv.style.height = '100%';
     ctx.imageSmoothingEnabled = false;
     buildStatic();
-    orca.scale = Math.max(3, Math.min(7, Math.floor(H * 0.10 / 14)));
-    orca.x = Math.round(W / 2 - (18 * orca.scale) / 2);
-    orca.y = Math.round(H * 0.42);
+    layoutOrca(art());
   }
   function setPixelScale(v) {
     ST.state.settings.pixelScale = v;
@@ -304,7 +305,7 @@
     }
     if (enabled.e6 && Math.random() < 0.4) {
       particles.push({
-        x: orca.x + (Math.random() * 60 - 30), y: orca.y + 24, vx: 6, vy: -18, g: -4,
+        x: orca.x + (Math.random() * orca.w * 0.5 - orca.w * 0.25), y: orca.y + orca.h, vx: 6, vy: -18, g: -4,
         life: 900, max: 900, c: pick(['#ffd447', '#ff8a3a', '#ff5a2a']), s: 2
       });
     }
@@ -322,7 +323,7 @@
   /* ---------- эффекты клика ---------- */
   function clickFx(x, y, amount, crit, combo) {
     var s = orca.scale;
-    var cx = x || (orca.x + 18 * s / 2);
+    var cx = x || (orca.x + orca.w / 2);
     var cy = y || (orca.y + 6 * s);
     orca.squash = 1;
     orcaGlow = 40;
@@ -389,7 +390,7 @@
     }
   }
   function fishDrop() {
-    caughtFish = { x: orca.x + 10, y: orca.y + 10, life: 1600, max: 1600, vx: 30, vy: -40 };
+    caughtFish = { x: orca.x + orca.w * 0.5, y: orca.y + orca.h * 0.5, life: 1600, max: 1600, vx: 30, vy: -40 };
   }
 
   /* ---------- рисование ---------- */
@@ -550,70 +551,134 @@
       var spr = SPR.get(b.type.sprite);
       ctx.drawImage(spr, Math.round(b.x - spr.width * sc / 2), Math.round(b.y - spr.height * sc / 2 + bob), spr.width * sc, spr.height * sc);
     }
-    /* косатка */
+    /* кошка */
     var sc2 = orca.scale;
     var sq = 1 - orca.squash * 0.18;
-    var wAdd = (1 - sq) * 18 * sc2 * 0.5;
+    var wAdd = (1 - sq) * orca.w * 0.5;
     var bobY = Math.sin(orca.bob) * 2;
-    var skin = ST.skin(stateSkinPal());
+    var sk = ST.skin(ST.state.skin);
+    var skinId = sk ? sk.id : 'normal';
+    var art2 = art();
+    var ax = orca.x - wAdd, ay = orca.y + bobY - (1 - sq) * 3;
+
     /* тень */
     ctx.globalAlpha = 0.25;
     ctx.fillStyle = '#000000';
-    ctx.fillRect(Math.round(orca.x + wAdd), Math.round(orca.y + 12 * sc2 + 3), Math.round(16 * sc2 * sq), 2);
+    ctx.fillRect(Math.round(ax + orca.w * 0.22), Math.round(ay + orca.h * 0.97), Math.round(orca.w * 0.56 * sq), 2);
     ctx.globalAlpha = 1;
+
     /* неоновое свечение */
     if (enabled.e2) {
-      ctx.globalAlpha = 0.18 + 0.08 * Math.sin(t * 4);
-      ctx.fillStyle = skin === 'neon' ? '#2ee0d0' : theme.amb;
-      var gw = 22 * sc2, gh = 16 * sc2;
-      ctx.fillRect(Math.round(orca.x + 8 * sc2 - gw / 2), Math.round(orca.y + 7 * sc2 - gh / 2), Math.round(gw), Math.round(gh));
+      ctx.globalAlpha = 0.16 + 0.07 * Math.sin(t * 4);
+      ctx.fillStyle = skinId === 'cyberpunk' ? '#2ee0d0' : theme.amb;
+      var gw = orca.w * 1.25, gh = orca.h * 1.2;
+      ctx.fillRect(Math.round(ax + orca.w / 2 - gw / 2), Math.round(ay + orca.h / 2 - gh / 2), Math.round(gw), Math.round(gh));
       ctx.globalAlpha = 1;
     }
-    SPR.draw(ctx, 'orca',
-      orca.x - wAdd, orca.y + bobY - (1 - sq) * 3,
-      sc2, { pal: skin, outline: true, flip: false });
-    /* космическая корона */
-    if (skin === 'cosmo') {
-      ctx.fillStyle = '#c8d0e0';
-      ctx.fillRect(Math.round(orca.x + 4 * sc2), Math.round(orca.y + bobY - 2), Math.round(8 * sc2), 2);
-      ctx.fillStyle = '#4ae0e0';
-      ctx.fillRect(Math.round(orca.x + 5 * sc2), Math.round(orca.y + bobY - 1), Math.round(2 * sc2), 1);
-    }
-    /* пиратская шляпа */
-    if (skin === 'pirate') {
+
+    SPR.draw(ctx, artKey(), ax, ay, sc2, { pal: stateSkinPal(), outline: true, flip: false });
+
+    /* ---- акценты конкретных кошек ---- */
+    if (skinId === 'cyberpunk') {
+      /* неоновые очки */
+      var vy = ay + orca.h * 0.30, vw = Math.max(2, Math.round(orca.w * 0.09));
+      ctx.fillStyle = '#2ee0d0';
+      ctx.fillRect(Math.round(ax + orca.w * 0.22), Math.round(vy), vw, Math.max(1, Math.round(orca.h * 0.035)));
+      ctx.fillRect(Math.round(ax + orca.w * 0.58), Math.round(vy), vw, Math.max(1, Math.round(orca.h * 0.035)));
+      ctx.fillStyle = '#ff4ad0';
+      ctx.fillRect(Math.round(ax + orca.w * 0.22), Math.round(vy), vw, 1);
+      ctx.fillRect(Math.round(ax + orca.w * 0.58), Math.round(vy), vw, 1);
+    } else if (skinId === 'richi') {
+      /* золотая корона + искры */
+      var cy2 = ay + orca.h * 0.02;
+      ctx.fillStyle = '#ffd447';
+      ctx.fillRect(Math.round(ax + orca.w * 0.30), Math.round(cy2), Math.max(2, Math.round(orca.w * 0.40)), Math.max(1, Math.round(orca.h * 0.03)));
+      for (var kq = 0; kq < 3; kq++) {
+        var kx = ax + orca.w * (0.32 + kq * 0.18);
+        ctx.fillRect(Math.round(kx), Math.round(cy2 - orca.h * 0.04), Math.max(1, Math.round(orca.w * 0.06)), Math.max(1, Math.round(orca.h * 0.04)));
+      }
+      for (var sp = 0; sp < 4; sp++) {
+        var sa = t * 1.5 + sp * 1.57;
+        var sx = ax + orca.w * (0.5 + Math.cos(sa) * 0.42);
+        var sy = ay + orca.h * (0.5 + Math.sin(sa * 1.3) * 0.4);
+        ctx.globalAlpha = 0.4 + 0.5 * Math.abs(Math.sin(sa * 2));
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillRect(Math.round(sx), Math.round(sy), 2, 2);
+      }
+      ctx.globalAlpha = 1;
+    } else if (skinId === 'cute' || skinId === 'bugeyed') {
+      /* сердечки */
+      for (var hh = 0; hh < 3; hh++) {
+        var pa = t * 1.1 + hh * 2.1;
+        var hx = ax + orca.w * (0.15 + hh * 0.35) + Math.sin(pa) * 4;
+        var hy = ay - orca.h * 0.12 - ((pa * 12) % (orca.h * 0.6));
+        ctx.globalAlpha = Math.max(0, 0.75 - (hy < ay - orca.h * 0.6 ? 0.75 : 0));
+        ctx.fillStyle = '#ff8ab0';
+        ctx.fillRect(Math.round(hx), Math.round(hy), 3, 3);
+        ctx.fillRect(Math.round(hx - 1), Math.round(hy + 1), 5, 1);
+        ctx.fillRect(Math.round(hx), Math.round(hy + 2), 3, 1);
+      }
+      ctx.globalAlpha = 1;
+    } else if (skinId === 'chillcat') {
+      /* очки и «z» */
       ctx.fillStyle = '#1a1a2a';
-      ctx.fillRect(Math.round(orca.x + 9 * sc2), Math.round(orca.y + bobY - 2), Math.round(6 * sc2), 2);
-      ctx.fillStyle = '#e04a5a';
-      ctx.fillRect(Math.round(orca.x + 11 * sc2), Math.round(orca.y + bobY), 1, 1);
-    }
-    /* радужная */
-    if (skin === 'rainbow') {
-      var hues = ['#ff4a4a', '#ff9a4a', '#ffd447', '#4ad07a', '#4ae0e0', '#4a7ff0', '#c05ae0'];
-      ctx.globalAlpha = 0.6;
-      for (var q = 0; q < 7; q++) {
-        ctx.fillStyle = hues[(q + Math.floor(t * 6)) % 7];
-        ctx.fillRect(Math.round(orca.x + q * 3), Math.round(orca.y + 14 * sc2 + bobY), 3, 2);
+      ctx.fillRect(Math.round(ax + orca.w * 0.20), Math.round(ay + orca.h * 0.30), Math.max(2, Math.round(orca.w * 0.26)), Math.max(1, Math.round(orca.h * 0.045)));
+      ctx.fillRect(Math.round(ax + orca.w * 0.54), Math.round(ay + orca.h * 0.30), Math.max(2, Math.round(orca.w * 0.26)), Math.max(1, Math.round(orca.h * 0.045)));
+      ctx.fillRect(Math.round(ax + orca.w * 0.46), Math.round(ay + orca.h * 0.30), Math.max(1, Math.round(orca.w * 0.06)), Math.max(1, Math.round(orca.h * 0.03)));
+      var zz = (Math.floor(t * 1.4) % 3) + 1;
+      ctx.fillStyle = '#dff6ff';
+      for (var zi = 0; zi < zz; zi++) {
+        var zx = ax + orca.w * (0.72 + zi * 0.10);
+        var zy = ay - orca.h * 0.1 - zi * orca.h * 0.11;
+        var zs = 2 + zi;
+        ctx.fillRect(Math.round(zx), Math.round(zy), zs * 3, zs);
+        ctx.fillRect(Math.round(zx + zs), Math.round(zy + zs), zs * 2, zs);
+        ctx.fillRect(Math.round(zx), Math.round(zy + zs * 2), zs * 3, zs);
+      }
+    } else if (skinId === 'wild') {
+      /* следы на воде */
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = theme.foam;
+      for (var wi = 0; wi < 3; wi++) {
+        var wpx = ax + orca.w * (0.1 + wi * 0.4) + ((t * 20) % 30);
+        ctx.fillRect(Math.round(wpx % W), Math.round(ay + orca.h * 1.02), 4, 1);
       }
       ctx.globalAlpha = 1;
-    }
-    /* древняя — руны */
-    if (skin === 'ancient') {
-      ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t * 3);
-      ctx.fillStyle = '#5ad0a0';
-      for (var rn = 0; rn < 3; rn++) {
-        ctx.fillRect(Math.round(orca.x + (4 + rn * 4) * sc2), Math.round(orca.y + (5 + rn) * sc2 + bobY), 2, 1);
+    } else if (skinId === 'beauty' || skinId === 'interesting') {
+      /* блёстки */
+      for (var bq = 0; bq < 3; bq++) {
+        var ba = t * 1.8 + bq * 2.4;
+        var bx = ax + orca.w * (0.2 + 0.6 * ((bq + t * 0.15) % 1));
+        var by = ay + orca.h * (0.15 + 0.5 * Math.abs(Math.sin(ba)));
+        ctx.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(ba * 1.7));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
+        ctx.fillRect(Math.round(bx - 1), Math.round(by), 4, 1);
+        ctx.fillRect(Math.round(bx), Math.round(by - 1), 2, 4);
       }
       ctx.globalAlpha = 1;
+    } else if (skinId === 'chonky') {
+      /* толстая кошка чуть ниже и шире: усиливаем squash */
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(Math.round(ax + orca.w * 0.1), Math.round(ay + orca.h * 0.95), Math.round(orca.w * 0.8), 2);
+      ctx.globalAlpha = 1;
+    } else if (skinId === 'hiding') {
+      /* торчит только из-под «дивана» */
+      ctx.fillStyle = '#2a1f4a';
+      ctx.fillRect(Math.round(ax - 4), Math.round(ay + orca.h * 0.62), Math.round(orca.w + 8), Math.round(orca.h * 0.45));
+      ctx.fillStyle = '#3a2a5a';
+      ctx.fillRect(Math.round(ax - 4), Math.round(ay + orca.h * 0.62), Math.round(orca.w + 8), 2);
     }
     /* пойманная рыба */
     if (caughtFish) {
       var a = 1 - caughtFish.life / caughtFish.max;
-      SPR.draw(ctx, 'fish', caughtFish.x + caughtFish.vx * a * 30, caughtFish.y - caughtFish.vy * a * 30 + a * a * 40, 2, {});
+      SPR.draw(ctx, 'img_fish', caughtFish.x + caughtFish.vx * a * 30, caughtFish.y - caughtFish.vy * a * 30 + a * a * 40, 2, {});
     }
     /* призраки */
     ctx.globalAlpha = 0.28;
     for (var gh = 0; gh < ghosts.length; gh++) {
-      SPR.draw(ctx, 'orca', ghosts[gh].x, ghosts[gh].y + Math.sin(t * 2 + gh) * 2, 3, { pal: 'cosmo', outline: false });
+      SPR.draw(ctx, artKey(), ghosts[gh].x, ghosts[gh].y + Math.sin(t * 2 + gh) * 2, Math.max(2, sc2), { pal: stateSkinPal(), outline: false });
     }
     ctx.globalAlpha = 1;
   }
@@ -622,6 +687,26 @@
     var s = ST.skin(ST.state.skin);
     return s ? s.pal : 'normal';
   }
+
+  /* картинка текущей кошки (или ASCII-запасняк, если PNG ещё не загрузился) */
+  function artKey() {
+    var s = ST.skin(ST.state.skin);
+    return s && s.art ? s.art : 'orca';
+  }
+  function art() {
+    var k = artKey();
+    var c = SPR.get(k, stateSkinPal(), true);
+    return { w: c.width, h: c.height, canvas: c };
+  }
+  function layoutOrca(a) {
+    orca.artW = a.w; orca.artH = a.h;
+    orca.scale = Math.max(1, Math.min(4, Math.floor(H * 0.58 / a.h)));
+    orca.w = a.w * orca.scale;
+    orca.h = a.h * orca.scale;
+    orca.x = Math.round(W / 2 - orca.w / 2);
+    orca.y = Math.round(H * 0.44 - orca.h / 2);
+  }
+  function relayout() { if (cv) layoutOrca(art()); }
 
   function drawParticles() {
     for (var i = 0; i < particles.length; i++) {
@@ -698,6 +783,7 @@
     get themeKey() { return themeKey; },
     get size() { return { w: W, h: H, px: PX }; },
     get canvas() { return cv; },
-    get orca() { return orca; }
+    get orca() { return orca; },
+    relayout: relayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);

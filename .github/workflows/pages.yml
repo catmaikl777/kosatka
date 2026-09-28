@@ -13,6 +13,7 @@ on:
       - 'css/**'
       - 'js/**'
       - 'img/**'
+      - 'audio/**'
       - 'sw.js'
       - 'manifest.webmanifest'
       - 'tools/prepare-pages.mjs'

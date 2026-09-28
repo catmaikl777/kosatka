@@ -9,8 +9,33 @@
    ============================================================ */
 'use strict';
 
-const VERSION = 'kosatka-v3.0.0';
+const VERSION = 'kosatka-v3.1.0';
 const CACHE = VERSION + '-shell';
+const ASSET_CACHE = VERSION + '-assets';
+
+/* Скины (6.6 МБ) и музыка (2.4 МБ) НЕ идут в precache: иначе install
+   игры съедал бы ~10 МБ на мобильном интернете. Они кэшируются лениво,
+   при первом обращении, с потолком в MAX_ASSET_BYTES. */
+const MAX_ASSET_BYTES = 40 * 1024 * 1024;
+
+async function trimCache(cache, max) {
+  const keys = await cache.keys();
+  let total = 0;
+  const sized = [];
+  for (const req of keys) {
+    const res = await cache.match(req);
+    const n = res ? Number(res.headers.get('content-length') || 0) : 0;
+    total += n;
+    sized.push([req, n]);
+  }
+  if (total <= max) return;
+  /* выкидываем самые старые записи до попадания в лимит */
+  for (const [req, n] of sized) {
+    if (total <= max) break;
+    await cache.delete(req);
+    total -= n;
+  }
+}
 
 /* PRECACHE:BEGIN — заполняется tools/prepare-pages.mjs */
 const PRECACHE = [
@@ -93,10 +118,13 @@ self.addEventListener('fetch', (e) => {
 
   /* свой статический ассет: сначала кэш, параллельно обновляем (stale-while-revalidate) */
   e.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const hit = await cache.match(req);
+    const shell = await caches.open(CACHE);
+    const assets = await caches.open(ASSET_CACHE);
+    const hit = await shell.match(req) || await assets.match(req);
     const net = fetch(req).then((res) => {
-      if (res && res.ok && res.type === 'basic') cache.put(req, res.clone()).catch(() => {});
+      if (res && res.ok && res.type === 'basic') {
+        assets.put(req, res.clone()).then(() => trimCache(assets, MAX_ASSET_BYTES)).catch(() => {});
+      }
       return res;
     }).catch(() => null);
     return hit || (await net) || Response.error();

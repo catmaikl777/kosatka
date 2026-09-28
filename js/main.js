@@ -12,6 +12,8 @@
   function boot() {
     ST.load();
     cacheEls();
+    /* картинки кошек грузим сразу: пока их нет — рисуются ASCII-заглушки */
+    root.PO_SPR.loadImages();
     FX.init(els.scene);
     root.CLICK.init(els.scene);
     root.QUESTS.init();
@@ -124,6 +126,7 @@
     }
   }
   function set(el, v) { if (el && el.textContent !== String(v)) el.textContent = v; }
+  function setId(id, v) { set(document.getElementById(id), v); }
 
   /* ---------- статус соединения ---------- */
   function wireStatus() {
@@ -216,6 +219,7 @@
     root.SND.volume = s.volume;
     FX.setTheme(s.theme);
     if (FX.size.px !== s.pixelScale) FX.setPixelScale(s.pixelScale);
+    if (document.body) document.body.setAttribute('data-bg', s.backdrop || 'none');
   }
 
   function wireSettings() {
@@ -260,6 +264,18 @@
         ST.save();
         FX.setTheme(b.dataset.theme);
         FX.setPixelScale(+document.getElementById('setPixel').value);
+        syncSettingsUI();
+      });
+    }
+    /* фото-фон страницы */
+    var bgRow = document.getElementById('bgRow');
+    if (bgRow) {
+      bgRow.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-bg]');
+        if (!b) return;
+        ST.state.settings.backdrop = b.dataset.bg;
+        ST.save();
+        if (document.body) document.body.setAttribute('data-bg', b.dataset.bg);
         syncSettingsUI();
       });
     }
@@ -323,15 +339,22 @@
     var chk = function (id, v) { var e = document.getElementById(id); if (e) e.checked = !!v; };
     chk('setMusic', s.music);
     chk('setSfx', s.sfx);
-    set('setVolume', Math.round(s.volume * 100));
-    set(document.getElementById('volTxt') ? 'volTxt' : 'setVolume', Math.round(s.volume * 100));
+    var vol = Math.round(s.volume * 100);
+    setId('setVolume', vol);
+    var volRange = document.getElementById('setVolume');
+    if (volRange) volRange.value = vol;
+    set(document.getElementById('volTxt'), vol);
     chk('setEffectsAll', s.effectsAll);
     chk('setShake', s.shake);
     chk('setDamage', s.showDamage);
-    set('setPixel', s.pixelScale);
+    setId('setPixel', s.pixelScale);
     document.querySelectorAll('#themeRow [data-theme]').forEach(function (b) {
       b.classList.toggle('active', b.dataset.theme === s.theme);
     });
+    document.querySelectorAll('#bgRow [data-bg]').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.bg === s.backdrop);
+    });
+    if (document.body) document.body.setAttribute('data-bg', s.backdrop || 'none');
     var fl = document.getElementById('fxToggleList');
     if (fl) {
       if (!fl.dataset.built) {

@@ -131,15 +131,68 @@ async function main() {
   ok('повторный вход B', relogin.t === 'auth:ok');
 
   /* 4. облачный сейв */
+  /* skin обязан быть настоящим id из DATA.SKINS: сервер чистит выдуманные */
   const bigState = {
-    coins: 12345, totalCoins: 999999, level: 12, skin: 'lava',
+    coins: 12345, totalCoins: 999999, level: 12, skin: 'chillcat',
+    skinsOwned: ['normal', 'chillcat'], skins: ['chillcat'],
+    upgrades: { claw: 3 }, effectsOwned: ['e1'], effectsOn: { e1: 1 },
     stats: { clicks: 4200, pvpWins: 2, raidWins: 1, bestCps: 15 },
     eventTickets: 25, eventSeasonScore: 0, clan: {}
   };
   const saved = await A.send('save', { state: bigState });
   ok('сейв A принят', saved.t === 'save:ok');
   const loaded = await A.send('load');
-  ok('сейв A загружен обратно', loaded.state.totalCoins === 999999 && loaded.state.skin === 'lava');
+  ok('сейв A загружен обратно', loaded.state.totalCoins === 999999 && loaded.state.skin === 'chillcat');
+  ok('улучшения и эффекты сохранились',
+    loaded.state.upgrades.claw === 3 && loaded.state.effectsOn.e1 === 1);
+
+  /* враждебный сейв: клиент не должен утащить наверх мусорные значения */
+  /* отдельный аккаунт, чтобы не обнулить баланс A для следующих проверок */
+  const HACK = new TestClient('H');
+  await HACK.ready;
+  await HACK.send('auth:register', { name: 'Читер' + uniq, pass: 'pass1234' });
+  const evil = await HACK.send('save', { state: {
+    coins: 1e300, totalCoins: -5, level: 10 ** 9, fish: Infinity,
+    skin: 'hackerCat', skinsOwned: ['normal', 'hackerCat'],
+    upgrades: { fire: 1e12, notARealUpgrade: 99 },
+    effectsOwned: ['e1', 'fakeEffect'], effectsOn: { e1: 1, fakeEffect: 1 },
+    stats: { clicks: 1e300 },
+    buff: { mult: 1e9, until: 1e15, name: 'x'.repeat(500) },
+    junk: { a: 1 }
+  } }).then(() => HACK.send('load'));
+  const es = evil.state;
+  ok('coins зажаты', es.coins <= 1e18);
+  ok('отрицательное число не проходит', es.totalCoins === 0);
+  ok('уровень ограничен', es.level <= 5000);
+  ok('Infinity превращается в 0', es.fish === 0);
+  ok('выдуманный скин заменён на normal', es.skin === 'normal');
+  ok('выдуманный скин убран из списка', !es.skinsOwned.includes('hackerCat'));
+  ok('выдуманное улучшение отброшено', !('notARealUpgrade' in es.upgrades));
+  ok('выдуманный эффект отброшен', !es.effectsOwned.includes('fakeEffect') && !('fakeEffect' in es.effectsOn));
+  ok('множитель буфта ограничен 100', es.buff.mult === 100);
+  ok('имя буфта обрезано', es.buff.name.length <= 32);
+  /* неизвестные ключи по идее сохраняются: иначе игрок потерял бы
+     прогресс при входе с другого устройства. Проверяем, что они
+     безопасны, а не выкинуты. */
+  ok('неизвестный ключ пережил (чтобы не терять прогресс)', 'junk' in es, JSON.stringify(es.junk));
+  /* отдельный аккаунт, чтобы не обнулить баланс A для следующих проверок */
+  const SAVE = new TestClient('S');
+  await SAVE.ready;
+  await SAVE.send('auth:register', { name: 'Синхро' + uniq, pass: 'pass1234' });
+  const res2 = await SAVE.send('save', { state: {
+    quests: { done: ['q1', 'q2'], idx: 3 },
+    achievements: { a1: 1 },
+    fishTypes: { tuna: 4 }, titles: ['t1'], unlocked: { x: true }
+  } }).then(() => SAVE.send('load')).then(r => r.state);
+  ok('прогресс (квесты) пережил поездку', !!res2.quests && res2.quests.done.length === 2 && res2.quests.idx === 3, JSON.stringify(res2.quests));
+  ok('достижения пережили поездку', res2.achievements && res2.achievements.a1 === 1);
+  ok('рыба и титулы пережили поездку', res2.fishTypes.tuna === 4 && res2.titles[0] === 't1');
+  /* слишком глубокая вложенность режется, а не роняет сервер */
+  const deepEvil = await SAVE.send('save', { state: { a: { b: { c: { d: { e: { f: { g: { h: 1 } } } } } } } } }).then(() => SAVE.send('load')).then(r => r.state);
+  ok('глубокая вложенность обрезана', deepEvil.a && deepEvil.a.b && deepEvil.a.b.c && deepEvil.a.b.c.d && deepEvil.a.b.c.d.e.f.g === null, JSON.stringify(deepEvil.a));
+  /* прототип нельзя подсунуть */
+  const proto = await SAVE.send('save', { state: JSON.parse('{"__proto__":{"admin":true},"coins":5}') }).then(() => SAVE.send('load')).then(r => r.state);
+  ok('__proto__ не попадает в сейв', ({}).admin === undefined && proto.coins === 5, JSON.stringify(Object.keys(proto)));
 
   /* 5. лидерборд */
   const lb = await A.send('lb', { sort: 'coins' });
@@ -264,6 +317,7 @@ async function main() {
     dbs && Object.values(dbs.accounts).every(a => typeof a.pass === 'string' && a.pass.length === 64));
 
   A.close(); B.close(); C.close();
+  try { HACK.close(); SAVE.close(); } catch (e) { /* необязательно */ }
 }
 
 main().then(() => {

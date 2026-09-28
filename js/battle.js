@@ -9,6 +9,8 @@
   var mode = null;           /* 'pvp' | 'raid' */
   var myScore = 0, foeScore = 0, timeLeft = 0, running = false;
   var pendingClicks = 0, sendT = 0, lastTs = 0, lastMyClick = 0;
+  var myClicks = 0;   /* клики в текущем бою — по ним считаются билеты ивента */
+  var serverDraw = false;  /* ничья по мнению сервера */
   var raidTeam = null, foeTeam = null, teamScore = 0, foeTeamScore = 0;
   var mySlot = 0;
   var splashes = [];
@@ -150,6 +152,7 @@
   function battleClick() {
     if (!running || !modal) return;
     myScore++;
+    myClicks++;
     pendingClicks++;
     lastMyClick = Date.now();   /* свой орка чуть подпрыгивает после клика */
     root.SND.play('click');
@@ -201,6 +204,8 @@
 
   function startMatch(duration, foeName, foeSkin, kind) {
     myScore = 0; foeScore = 0; teamScore = 0; foeTeamScore = 0;
+    myClicks = 0;
+    serverDraw = false;
     timeLeft = duration;
     pendingClicks = 0;
     lastMyClick = 0;
@@ -317,39 +322,69 @@
     if (!botMode && mode) flushClicks(true);
     root.CLICK.battleMode = false;
     root.CLICK.battleCallback = null;
-    var win, my, foe;
-    if (mode === 'pvp') { my = myScore; foe = foeScore; win = my >= foe; }
-    else { my = teamScore; foe = foeTeamScore; win = my >= foe; }
-    var reward = Math.floor((win ? 2000 : 400) * ST.state.level * (mode === 'raid' ? 3 : 1));
+
+    var my, foe;
+    if (mode === 'pvp') { my = myScore; foe = foeScore; }
+    else { my = teamScore; foe = foeTeamScore; }
+    /* равный счёт — это ничья, а не победа */
+    var draw = serverDraw || Math.round(my) === Math.round(foe);
+    var win = !draw && my > foe;
+    var lose = !win && !draw;
+    serverDraw = false;
+
+    var reward = Math.floor((win ? 2000 : draw ? 900 : 400) * ST.state.level * (mode === 'raid' ? 3 : 1));
     ST.addCoins(reward, true);
-    ST.state.stats.pvpPlayed++;
-    ST.bump('pvpPlayed');
+
     if (mode === 'pvp') {
+      ST.state.stats.pvpPlayed++;
+      ST.bump('pvpPlayed');
       if (win) { ST.state.stats.pvpWins++; ST.bump('pvpWins'); }
-      else ST.state.stats.pvpLose = (ST.state.stats.pvpLose || 0) + 1;
+      else if (lose) ST.state.stats.pvpLose = (ST.state.stats.pvpLose || 0) + 1;
     } else {
       ST.state.stats.raidPlayed++;
       ST.bump('raidPlayed');
-      if (win) {
-        ST.state.stats.raidWins++;
-        ST.bump('raidWins');
-        if (ST.state.stats.raidWins >= 5 && ST.state.skinsOwned.indexOf('royal') < 0) {
-          ST.unlockSkin('royal');
+      if (win) { ST.state.stats.raidWins++; ST.bump('raidWins'); }
+    }
+
+    /* серия побед (для достижения «На кураже») */
+    if (win) {
+      ST.state.stats.winStreak = (ST.state.stats.winStreak || 0) + 1;
+      ST.bump('winStreak');
+      if (ST.state.stats.winStreak > (ST.state.stats.bestWinStreak || 0)) {
+        ST.state.stats.bestWinStreak = ST.state.stats.winStreak;
+        ST.bump('bestWinStreak');
+      }
+    } else {
+      ST.state.stats.winStreak = 0;
+    }
+
+    /* скин за 5 побед в рейдах — ищем по флагу, а не по захардкоженному id */
+    if (win && mode === 'raid') {
+      for (var i = 0; i < D.SKINS.length; i++) {
+        var s = D.SKINS[i];
+        if (s.raid && ST.state.stats.raidWins >= s.raid && ST.state.skinsOwned.indexOf(s.id) < 0) {
+          ST.unlockSkin(s.id);
         }
       }
     }
-    var tickets = Math.floor((ST.state.stats.clicks ? 1 : 0));
+
+    /* билеты ивента — за клики в самом бою */
+    var tickets = Math.floor(myClicks / D.EVENT.pvpClickDiv);
     ST.save();
-    root.SND.play(win ? 'win' : 'lose');
-    UI.banner(win ? 'ПОБЕДА!' : 'ПОРАЖЕНИЕ', win ? 'banner-good' : 'banner-bad', 1800);
+    if (tickets > 0) ST.addTickets(tickets);
+
+    root.SND.play(win ? 'win' : lose ? 'lose' : 'click');
+    var title = win ? 'ПОБЕДА!' : draw ? 'НИЧЬЯ' : 'ПОРАЖЕНИЕ';
+    var cls = win ? 'banner-good' : lose ? 'banner-bad' : 'banner-info';
+    UI.banner(title, cls, 1800);
+
     var html = '<div class="result-box">' +
-      (mode === 'pvp' ? '<div class="result-score">' + ST.fmt(my) + ' : ' + ST.fmt(foe) + '</div>' :
-        '<div class="result-score">' + ST.fmt(my) + ' : ' + ST.fmt(foe) + '</div>') +
+      '<div class="result-score">' + ST.fmt(my) + ' : ' + ST.fmt(foe) + '</div>' +
       '<div class="result-reward">Награда: ' + ST.fmt(reward) + ' косаток</div>' +
-      '<div class="result-tickets">Билеты ивента: +' + tickets + '</div></div>';
-    var m = UI.modalShell(win ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ', html,
+      '<div class="result-tickets">Билеты ивента: +' + tickets +
+      ' <span class="dim">(' + myClicks + ' кликов / ' + D.EVENT.pvpClickDiv + ')</span></div></div>';
+    var m = UI.modalShell(win ? 'ПОБЕДА' : draw ? 'НИЧЬЯ' : 'ПОРАЖЕНИЕ', html,
       { footer: '<button class="px-btn px-btn-primary" data-close="1">В меню</button>' });
-    if (win) ST.addTickets(tickets);
     if (root.QUESTS) root.QUESTS.check();
     var self = this;
     setTimeout(function () { closeModal(); }, 2600);
@@ -427,9 +462,14 @@
     var box = modal && modal.querySelector('#rdMyTeam');
     if (!box) return;
     if (!team) { box.innerHTML = ''; return; }
-    var h = '<div class="my-lobby-box"><b>Команда ' + UI.escapeHtml(team.owner) + '</b><div class="raid-mem">';
-    for (var i = 0; i < team.players.length; i++) {
-      h += '<span>' + UI.escapeHtml(team.players[i]) + '</span>';
+    /* server.js teamView отдаёт players как ЧИСЛО участников,
+       а список имён лежит в names. Раньше код брал team.players[i]
+       и цикл не выполнялся — состав команды был всегда пуст. */
+    var names = team.names || [];
+    var h = '<div class="my-lobby-box"><b>Команда ' + UI.escapeHtml(team.owner) + '</b>' +
+      '<div class="dim">участников: ' + (team.players || 0) + '/3</div><div class="raid-mem">';
+    for (var i = 0; i < names.length; i++) {
+      h += '<span>' + UI.escapeHtml(names[i]) + '</span>';
     }
     h += '</div><button class="px-btn px-btn-small px-btn-danger" id="rdLeave">ВЫЙТИ ИЗ КОМАНДЫ</button>' +
       '<button class="px-btn px-btn-small px-btn-primary" id="rdGo">В БОЙ</button></div>';
@@ -468,13 +508,19 @@
       if (m.you != null) { myScore = m.you; foeScore = m.foe; }
       if (running) finish();
       else {
-        ST.addCoins(Math.floor((m.win ? 2000 : 400) * ST.state.level), true);
+        /* бой закончился, пока окно лобби ещё было открыто */
+        var isDraw = !!m.draw;
+        ST.addCoins(Math.floor((m.win ? 2000 : isDraw ? 900 : 400) * ST.state.level), true);
         if (m.win) { ST.state.stats.pvpWins++; ST.bump('pvpWins'); }
+        else if (!isDraw) ST.state.stats.pvpLose = (ST.state.stats.pvpLose || 0) + 1;
         ST.state.stats.pvpPlayed++;
-        ST.addTickets(Math.floor((m.yourClicks || 0) / D.EVENT.pvpClickDiv));
+        ST.bump('pvpPlayed');
+        var tk = Math.floor((m.yourClicks || 0) / D.EVENT.pvpClickDiv);
+        if (tk > 0) ST.addTickets(tk);
         ST.save();
-        root.SND.play(m.win ? 'win' : 'lose');
-        UI.banner(m.win ? 'ПОБЕДА!' : 'ПОРАЖЕНИЕ', m.win ? 'banner-good' : 'banner-bad', 1600);
+        root.SND.play(m.win ? 'win' : isDraw ? 'ui' : 'lose');
+        UI.banner(m.win ? 'ПОБЕДА!' : isDraw ? 'НИЧЬЯ' : 'ПОРАЖЕНИЕ',
+          m.win ? 'banner-good' : isDraw ? 'banner-info' : 'banner-bad', 1600);
       }
     });
     API.on('pvp:left', function () { if (modal && mode === 'pvp') { showMyLobby(null); refreshLobbies(); } });
@@ -496,6 +542,7 @@
     API.on('raid:end', function (m) {
       if (mode !== 'raid') return;
       if (m.you != null) { teamScore = m.you; foeTeamScore = m.foe; }
+      serverDraw = !!m.draw;
       if (running) finish();
     });
   }
