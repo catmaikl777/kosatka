@@ -283,6 +283,9 @@ const server = http.createServer((req, res) => {
       dbSource: DB_PATH.source,
       dbFirst: (DB_BORN && DB_BORN.first) || null,
       dbSameFs: DB_SAME_FS,
+      /* доступные для записи каталоги на ОТДЕЛЬНОЙ ФС — если платформа
+         подключила том, но DATA_FILE смотрит в образ, вент здесь */
+      dbVolumes: PATHS.volumes(),
       seasonLeft: Math.max(0, db.seasonEnd - Date.now())
     });
     res.writeHead(closing ? 503 : 200, Object.assign({}, base, { 'Content-Type': 'application/json; charset=utf-8' }));

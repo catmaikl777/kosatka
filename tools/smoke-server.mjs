@@ -389,6 +389,8 @@ main().then(() => {
     try { fs.unlinkSync(f); fs.unlinkSync(f + '.firstborn'); } catch (e) { /* ignore */ }
     const same = PATHS.sameFs(ROOT, path.dirname(ROOT));
     ok('сверка ФС базы и кода возвращает булево значение', same === true || same === false || same === null, String(same));
+    const vols = PATHS.volumes();
+    ok('поиск томов возвращает массив путей на отдельной ФС', Array.isArray(vols), JSON.stringify(vols));
   }
 
   console.log('');

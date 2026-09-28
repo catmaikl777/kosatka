@@ -89,4 +89,21 @@ function sameFs(a, b) {
   catch (e) { return null; }
 }
 
-module.exports = { resolve, migrateIfNeeded, writableDir, LEGACY, mark, sameFs };
+/* Где платформа держит постоянный диск? Часто том подключён, но DATA_FILE
+   смотрит в образ — тогда аккаунты пишутся в слой и гибнут. Перебираем
+   типовые точки монтирования и отдаём те, что доступны на запись И лежат
+   на отдельной ФС: это и есть кандидаты для DATA_FILE. */
+const VOLUME_CANDIDATES = [
+  '/data', '/mnt/data', '/srv/data', '/opt/data', '/var/lib/kosatka',
+  '/persistent', '/storage', '/volume'
+];
+
+function volumes() {
+  const out = [];
+  for (const dir of VOLUME_CANDIDATES.concat([path.join(os.homedir(), '.kosatka')])) {
+    if (writableDir(dir) && sameFs(dir, __dirname) === false) out.push(dir);
+  }
+  return out;
+}
+
+module.exports = { resolve, migrateIfNeeded, writableDir, LEGACY, mark, sameFs, volumes };
