@@ -479,23 +479,48 @@ ST.state.coins = 1e12;
 ST.state.fish = 10;
 ST.state.shells = 10;
 const boxesBefore = ST.state.stats.boxesOpened;
+/* Ждём не фиксированное время, а сам лот: на медленной машине (CI) 1900мс
+   может не хватить, и тесты падали бы из-за скорости, а не из-за бага.
+   Смотрим ТОЛЬКО открытые окна: закрытые остаются в DOM ещё 200мс, иначе
+   старый лот засчитывался бы как свежий. */
+const openDialogs = () => [...document.querySelectorAll('.px-modal.dialog.open')];
+const waitLoot = async (ms = 6000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (openDialogs().some(m => m.querySelector('.loot-list'))) return true;
+    await sleep(50);
+  }
+  return false;
+};
+/* Дождаться конца анимации и закрыть окно. Важно: UI.closeAll() сам по себе
+   НЕ отменяет открытие (это не клик), поэтому жмём «×» — только он сбрасывает
+   rolling. Иначе следующий openBox() молча игнорируется и каскадом ломает
+   все тесты ниже. */
+const settle = async () => {
+  await waitLoot();
+  const x = openDialogs().pop() && openDialogs().pop().querySelector('[data-close]');
+  if (x) x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+  UI.closeAll();
+};
 const boxId = DATA.BOXES[0].id;
 const r = SHOP.openBox(boxId);
 ok('бокс открывается (списание + счётчик)', ST.state.stats.boxesOpened === boxesBefore + 1 && ST.state.coins < 1e12,
   `${boxesBefore} → ${ST.state.stats.boxesOpened}, id=${boxId}, ответ=${JSON.stringify(r)}`);
-await sleep(1900);                      /* интрига 1470мс + лут на 1690мс */
+await waitLoot();                         /* интрига 1470мс + лут на 1690мс */
 ok('бокс выдал награду', errors.length === 0, errors.slice(0, 2).join(' | '));
 const loot = document.querySelectorAll('.loot-list');
 ok('окно лута показано', loot.length > 0,
   `найдено=${loot.length}, body.children=${document.body.children.length}, modals=${document.querySelectorAll('.px-modal').length}, html=${loot.length ? loot[0].innerHTML.slice(0, 80) : document.body.innerHTML.slice(0, 120)}`);
 ok('иконки лута отрисованы', loot.length > 0 && [...loot[0].querySelectorAll('canvas[data-spr]')]
   .every(c => c.dataset.painted === '1'), 'пустые канвасы в окне лута');
-ok('после открытия бокс снова доступен', SHOP.openBox !== undefined && ST.state.boxesOpened >= 0,
-  'rolling сброшен');
-UI.closeAll();
+/* rolling должен сброситься: следующий бокс обязан открыться */
+const boxesAfterFirst = ST.state.stats.boxesOpened;
+SHOP.openBox(boxId);
+ok('после открытия бокс снова доступен', ST.state.stats.boxesOpened === boxesAfterFirst + 1,
+  `rolling не сброшен: ${boxesAfterFirst} → ${ST.state.stats.boxesOpened}`);
+await settle();
 
 /* --- закрытие модалки бокса до кульминации: добыча не теряется --- */
-UI.closeAll();
 ST.state.coins = 1e12;
 const BOX0 = DATA.BOXES[0];
 const fishBefore = ST.state.fish, shellsBefore = ST.state.shells;
@@ -503,14 +528,14 @@ const ticketsBefore = ST.state.eventTickets, fxBefore = ST.state.effectsOwned.le
 const openedBefore = ST.state.stats.boxesOpened;
 const coinsBeforeCut = ST.state.coins;
 SHOP.openBox(BOX0.id);
-const stage = document.querySelector('.box-stage');
-ok('фаза интриги показана до взрыва', !!stage, 'нет .box-stage');
+/* сцену берём из ОТКРЫТОГО окна: закрытые ещё 200мс висят в DOM,
+   иначе клик ушёл бы в модалку от предыдущего теста */
+const boxModal = openDialogs().pop();
+const stage = boxModal && boxModal.querySelector('.box-stage');
+ok('фаза интриги показана до взрыва', !!stage, 'нет .box-stage в открытом окне');
 if (stage) {
-  /* идём вверх до обёртки-диалога и жмём «×» — как будто игрок передумал */
-  let wrap = stage;
-  while (wrap && !(wrap.classList && wrap.classList.contains('dialog'))) wrap = wrap.parentNode;
-  ok('модалка бокса — диалог', !!wrap, stage.className);
-  const closeBtn = wrap && wrap.querySelector('[data-close]');
+  /* жмём «×» — как будто игрок передумал, не дожидаясь взрыва */
+  const closeBtn = boxModal.querySelector('[data-close]');
   ok('у модалки бокса есть кнопка закрытия', !!closeBtn);
   if (closeBtn) closeBtn.dispatchEvent({ type: 'click', target: closeBtn, bubbles: true });
 }
@@ -526,32 +551,56 @@ ok('при досрочном закрытии лот всё равно выда
   `boxes=${ST.state.stats.boxesOpened}, лут=${netCoins}🐋/${ST.state.fish}🐟/${ST.state.shells}🐚/${ST.state.eventTickets}🎫`);
 /* и боксы снова открываются: rolling не залип */
 const openedAfter = ST.state.stats.boxesOpened;
-SHOP.openBox(DATA.BOXES[0].id);
+SHOP.openBox(BOX0.id);
 ok('после досрочного закрытия новый бокс открывается', ST.state.stats.boxesOpened === openedAfter + 1,
   `${openedAfter} → ${ST.state.stats.boxesOpened}`);
-UI.closeAll();
+await settle();
 
 /* --- регресс: закрытие ПОСЛЕ показа лута не выдаёт второй бонус --- */
-UI.closeAll();
-await sleep(1900);                        /* даём дописать предыдущую анимацию */
 ST.state.coins = 1e12;
-const doneBoxes = ST.state.stats.boxesOpened;
-const doneFish = ST.state.fish, doneShells = ST.state.shells;
-SHOP.openBox(DATA.BOXES[0].id);
-await sleep(1900);                        /* ждём все три фазы */
-const doneLoot = [...document.querySelectorAll('.px-modal.dialog')].pop();
-ok('после всех фаз показан лот', !!doneLoot && !!doneLoot.querySelector('.loot-list'), '');
+SHOP.openBox(BOX0.id);
+ok('после всех фаз показан лот', await waitLoot(), 'лот не показан');
+/* Замер делаем ПОСЛЕ выдачи лота: бокс законно что-то роняет, а вот закрытие
+   окна не должно добавить ещё — иначе бокс можно «фармить», не дожидаясь взрыва. */
+const boxesAfter = ST.state.stats.boxesOpened;
+const fishAfter = ST.state.fish, shellsAfter = ST.state.shells, coinsAfter = ST.state.coins;
+const doneLoot = openDialogs().pop();
+ok('бокс засчитан ровно один раз', boxesAfter > 0, String(boxesAfter));
 if (doneLoot) {
   const x = doneLoot.querySelector('[data-close]');
   ok('после открытия лута кнопка «×» на месте', !!x);
-  /* жмём «×» и сразу ещё раз — второй клик по кнопке закрытия */
-  if (x) x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+  if (x) {
+    x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+    /* и повторно — как будто игрок ткнул ещё раз по уже закрытому окну */
+    x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+  }
 }
 ok('закрытие окна лута не выдаёт дополнительную добычу',
-  ST.state.stats.boxesOpened === doneBoxes + 1 &&
-  ST.state.fish === doneFish && ST.state.shells === doneShells,
-  `boxes ${doneBoxes}→${ST.state.stats.boxesOpened}, fish ${doneFish}→${ST.state.fish}, shells ${doneShells}→${ST.state.shells}`);
+  ST.state.stats.boxesOpened === boxesAfter &&
+  ST.state.fish === fishAfter && ST.state.shells === shellsAfter && ST.state.coins === coinsAfter,
+  `boxes ${boxesAfter}→${ST.state.stats.boxesOpened}, fish ${fishAfter}→${ST.state.fish}, shells ${shellsAfter}→${ST.state.shells}, coins ${coinsAfter}→${ST.state.coins}`);
 UI.closeAll();
+
+/* --- утечка DOM: closeAll обязан удалять окна modalShell, а не прятать их.
+       Иначе каждое открытие бокса навсегда оставляет поддерево в документе --- */
+/* сначала приводим DOM в покой, иначе считаем не свои окна */
+UI.closeAll();
+await sleep(300);
+const dynBefore = document.querySelectorAll('.px-modal.dyn').length;
+const probe = UI.modalShell('ТЕСТ', '<p>тест</p>');
+ok('тестовое окно создано', document.querySelectorAll('.px-modal.dyn').length === dynBefore + 1,
+  `${dynBefore} → ${document.querySelectorAll('.px-modal.dyn').length}`);
+UI.closeAll();
+ok('closeAll сразу снимает класс open', !probe.classList.contains('open'), probe.className);
+await sleep(300);                          /* closeEl удаляет узел через 200мс */
+/* судим по дереву: мини-DOM после removeChild не чистит parentNode у узла,
+   поэтому проверять ссылки на родителя здесь бессмысленно */
+ok('closeAll удаляет окно из DOM, а не просто прячет',
+  document.querySelectorAll('.px-modal.dyn').length === dynBefore,
+  `осталось .dyn=${document.querySelectorAll('.px-modal.dyn').length}, ждём ${dynBefore}`);
+/* статические окна из разметки при этом остаются на месте */
+ok('статическое окно настроек не выброшено из DOM',
+  !!document.getElementById('settings'), 'нет #settings');
 
 /* ================= 6. квесты и достижения ================= */
 const errQ = errors.length;

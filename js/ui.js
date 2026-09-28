@@ -66,7 +66,12 @@
   }
   function closeAll() {
     for (var i = openModals.length - 1; i >= 0; i--) {
-      openModals[i].classList.remove('open');
+      var m = openModals[i];
+      /* окна, созданные modalShell, живут только до закрытия — иначе они
+         навсегда копятся в DOM (бокс, подтверждения, ивенты). Статические
+         окна из разметки просто прячем: их открывают снова по id. */
+      if (m.classList.contains('dyn')) closeEl(m);
+      else m.classList.remove('open');
     }
     openModals = [];
     document.body.classList.remove('modal-open');
@@ -96,7 +101,7 @@
   /* ---------- диалоги ---------- */
   function modalShell(title, bodyHtml, opts) {
     opts = opts || {};
-    var wrap = el('div', 'px-modal dialog open');
+    var wrap = el('div', 'px-modal dialog dyn open');
     wrap.innerHTML =
       '<div class="px-modal-head"><h3>' + title + '</h3>' +
       '<button class="px-btn px-btn-x" data-close="1">×</button></div>' +
