@@ -29,7 +29,8 @@
     c.style.width = c.width + 'px';
     c.style.height = c.height + 'px';
     var ctx = c.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     SPR.draw(ctx, name, 0, 0, scale, { pal: pal, outline: true, flip: flip });
     return c;
   }
@@ -42,7 +43,8 @@
       if (c.dataset.painted) return;
       var g = c.getContext('2d');
       if (!g) return;
-      g.imageSmoothingEnabled = false;
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
       SPR.draw(g, c.dataset.spr, 0, 0, parseInt(c.dataset.sc || '2', 10), { pal: c.dataset.pal || null, outline: true });
       c.dataset.painted = '1';
     });

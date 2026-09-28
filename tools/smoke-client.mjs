@@ -330,6 +330,24 @@ ok('все модули доступны в глобальной области'
 /* main.js сам вызывает boot() при readyState=complete */
 ok('boot() отработал без исключений', errors.length === 0, errors.join(' | '));
 
+/* ---------- регресс: картинки не должны пикселизироваться ----------
+   Раньше везде стояло imageSmoothingEnabled = false и CSS
+   image-rendering: pixelated — спрайты и фото масштабировались
+   nearest-neighbour и выглядели грубой лесенкой. */
+{
+  const src = ['sprites', 'fx', 'battle', 'fishing', 'ui']
+    .map(n => fs.readFileSync(new URL('../js/' + n + '.js', import.meta.url), 'utf8')).join('\n');
+  ok('в js нет отключения сглаживания картинок',
+    !/imageSmoothingEnabled\s*=\s*false/.test(src),
+    (src.match(/imageSmoothingEnabled\s*=\s*false/g) || []).length + ' вхождений');
+  ok('сглаживание включается явно', /imageSmoothingEnabled\s*=\s*true/.test(src));
+
+  const css = fs.readFileSync(new URL('../css/pixel.css', import.meta.url), 'utf8');
+  ok('в css нет pixelated/crisp-edges', !/image-rendering\s*:\s*(pixelated|crisp-edges)/.test(css),
+    (css.match(/image-rendering\s*:\s*(pixelated|crisp-edges)/g) || []).join(', '));
+  ok('css задаёт image-rendering: auto', /image-rendering\s*:\s*auto/.test(css));
+}
+
 /* ---- HUD: гостевой кнопки нет, все валюты на главном экране ---- */
 /* шим не умеет descendant-селекторы, поэтому ищем через обход родителей */
 const inParentClass = (node, cls) => {

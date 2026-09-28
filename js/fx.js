@@ -154,7 +154,8 @@
   function init(canvas) {
     cv = canvas;
     ctx = cv.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     if (!theme) setTheme(ST.state.settings.theme || 'sunset');
     resize();
     window.addEventListener('resize', resize);
@@ -189,7 +190,8 @@
     cv.width = w; cv.height = h;
     cv.style.width = '100%';
     cv.style.height = '100%';
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     buildStatic();
     layoutOrca(art());
   }
@@ -421,7 +423,8 @@
   }
 
   function draw() {
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, W, H);
     var seaY = Math.round(H * 0.55);
     drawSky(seaY);

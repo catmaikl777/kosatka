@@ -741,7 +741,8 @@
     opts = opts || {};
     var cv = get(name, opts.pal, opts.outline !== false);
     scale = scale || 1;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     if (opts.flip) {
       ctx.save();
       ctx.translate(Math.round(x), Math.round(y));
@@ -773,7 +774,8 @@
     c.fillStyle = color;
     c.globalAlpha = alpha == null ? 0.5 : alpha;
     c.fillRect(0, 0, t.width, t.height);
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(t, Math.round(x), Math.round(y), t.width * scale, t.height * scale);
   }
 

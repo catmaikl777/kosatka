@@ -42,7 +42,8 @@
     canvas.width = W; canvas.height = H;
     canvas.style.width = (W * PX) + 'px';
     canvas.style.height = (H * PX) + 'px';
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
   }
 
   function spawn() {
@@ -147,7 +148,8 @@
   }
 
   function draw() {
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     /* вода */
     for (var y = 0; y < H; y += 2) {
       var d = y / H;

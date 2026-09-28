@@ -154,7 +154,8 @@
     var cssW = Math.min(w * px, bw);
     arena.style.width = cssW + 'px';
     arena.style.height = Math.round(cssW * 2 / 3) + 'px';
-    actx.imageSmoothingEnabled = false;
+    actx.imageSmoothingEnabled = true;
+    actx.imageSmoothingQuality = 'high';
   }
 
   var myCpsWin = [], foeCpsWin = [];
