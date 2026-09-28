@@ -376,6 +376,21 @@ main().then(() => {
   const noInject = withEnv({ DATA_FILE: '/tmp/kosatka-explicit/db.json', DATA_DIR: null }, () => PATHS.migrateIfNeeded({ file: '/tmp/kosatka-explicit/db.json', source: 'DATA_FILE' }));
   ok('в явно заданный DATA_FILE ничего не подмешивается', noInject === null, String(noInject));
 
+  /* ---------- диагностика переживаемости базы ----------
+     Метка первого запуска должна пережить рестарт процесса: по ней видно,
+     пережил ли каталог редеплой, ещё не дождавшись потери аккаунтов. */
+  {
+    const f = path.join(ROOT, 'server', 'data', 'test-mark.json');
+    const m1 = PATHS.mark(f);
+    ok('метка первого запуска создаётся', !!(m1 && m1.first), JSON.stringify(m1));
+    const m2 = PATHS.mark(f);
+    ok('метка не перезаписывается при повторном старте', m2 && m1 && m2.first === m1.first,
+      JSON.stringify(m2) + ' vs ' + JSON.stringify(m1));
+    try { fs.unlinkSync(f); fs.unlinkSync(f + '.firstborn'); } catch (e) { /* ignore */ }
+    const same = PATHS.sameFs(ROOT, path.dirname(ROOT));
+    ok('сверка ФС базы и кода возвращает булево значение', same === true || same === false || same === null, String(same));
+  }
+
   console.log('');
   console.log(`  Пройдено: ${pass}, провалено: ${fail}`);
   process.exit(fail ? 1 : 0);

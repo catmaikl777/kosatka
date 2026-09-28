@@ -41,7 +41,9 @@ const DB_PATH = PATHS.resolve();
 const DB_FILE = DB_PATH.file;
 const DB_DIR = path.dirname(DB_FILE);
 const DB_PERSISTENT = DB_PATH.persistent;
-const DB_MOVED_FROM = PATHS.migrateIfNeeded(DB_PATH);/* публичный адрес сервиса: платформы передают его по-разному.
+const DB_MOVED_FROM = PATHS.migrateIfNeeded(DB_PATH);
+const DB_BORN = PATHS.mark(DB_FILE);
+const DB_SAME_FS = PATHS.sameFs(DB_DIR, __dirname);/* публичный адрес сервиса: платформы передают его по-разному.
    Внимание: без скобок '||' перебивает '?:' по приоритету, и при заданном
    PUBLIC_URL/RENDER_EXTERNAL_URL (без FLY_APP_NAME) печатался бы
    https://undefined.fly.dev. */
@@ -81,7 +83,7 @@ let dbBrokenWarned = false;
 function saveDb(now) {
   if (now) return writeDb();
   if (saveTimer) return;
-  saveTimer = setTimeout(() => { saveTimer = null; writeDb(); }, 4000);
+  saveTimer = setTimeout(() => { saveTimer = null; writeDb(); }, 2000);
 }
 function writeDb() {
   try {
@@ -274,6 +276,13 @@ const server = http.createServer((req, res) => {
       lobbies: lobbies.size, teams: teams.size,
       /* dbPersistent: false — базу по-прежнему затирает деплой */
       dbPersistent: DB_PERSISTENT,
+      /* Диагностика переживаемости базы. dbFirst — метка первого запуска
+         на этом диске, она не перезаписывается: если после редеплоя её нет
+         или дата откатилась — каталог затирается вместе с образом.
+         dbSameFs: true — база лежит в слое образа (том не подключён). */
+      dbSource: DB_PATH.source,
+      dbFirst: (DB_BORN && DB_BORN.first) || null,
+      dbSameFs: DB_SAME_FS,
       seasonLeft: Math.max(0, db.seasonEnd - Date.now())
     });
     res.writeHead(closing ? 503 : 200, Object.assign({}, base, { 'Content-Type': 'application/json; charset=utf-8' }));
@@ -1128,6 +1137,11 @@ server.listen(PORT, HOST, () => {
   console.log('      ws://localhost:' + PORT + '/ws');
   if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
   console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
+  console.log('      путь выбран: ' + DB_PATH.source +
+    (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
+  if (DB_BORN && DB_BORN.first) {
+    console.log('      этот диск живёт с: ' + DB_BORN.first);
+  }
   if (DB_MOVED_FROM) {
     console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
   }
@@ -1135,6 +1149,11 @@ server.listen(PORT, HOST, () => {
     console.log('');
     console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
     console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');
+  } else if (DB_SAME_FS === true) {
+    console.log('');
+    console.log('  ⚠  Каталог базы — часть образа, а не подключённый том.');
+    console.log('     Если деплой пересоздаёт контейнер, аккаунты пропадут.');
+    console.log('     Проверь /api/health после редеплоя: поле dbFirst должно сохраниться.');
   }
   console.log('      Ctrl+C — остановить');
   console.log('');

@@ -64,4 +64,29 @@ function migrateIfNeeded(target) {
   }
 }
 
-module.exports = { resolve, migrateIfNeeded, writableDir, LEGACY };
+/* Метка первого запуска на этом диске.
+   Лежит рядом с базой и НИКОГДА не перезаписывается. Если после редеплоя
+   метка на месте с прежней датой — диск настоящий (volume), если её нет —
+   каталог затирается вместе с образом, и никакой путь внутри контейнера
+   не спасёт базу: нужен либо volume у платформы, либо внешняя БД. */
+function mark(file) {
+  const m = file + '.firstborn';
+  try {
+    if (!fs.existsSync(m)) {
+      fs.writeFileSync(m, JSON.stringify({ first: new Date().toISOString() }));
+    }
+    return JSON.parse(fs.readFileSync(m, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Каталог базы на отдельной ФС (томе), а не в слое контейнера?
+   device id у смонтированного тома отличается от корневого — по нему
+   видно, подключён ли volume, ещё до первого редеплоя. */
+function sameFs(a, b) {
+  try { return fs.statSync(a).dev === fs.statSync(b).dev; }
+  catch (e) { return null; }
+}
+
+module.exports = { resolve, migrateIfNeeded, writableDir, LEGACY, mark, sameFs };
