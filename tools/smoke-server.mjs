@@ -8,8 +8,11 @@
    ============================================================ */
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
+
+const require = createRequire(import.meta.url);
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(DIR, '..');
@@ -352,6 +355,27 @@ async function main() {
 }
 
 main().then(() => {
+  /* ---------- выбор пути к базе (server/paths.js) ---------- */
+  const PATHS = require(path.join(ROOT, 'server', 'paths.js'));
+  const withEnv = (env, fn) => {
+    const saved = {};
+    for (const k of Object.keys(env)) { saved[k] = process.env[k]; if (env[k] === null) delete process.env[k]; else process.env[k] = env[k]; }
+    try { return fn(); } finally { for (const k of Object.keys(env)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+  };
+  const explicit = withEnv({ DATA_FILE: '/tmp/kosatka-explicit/db.json', DATA_DIR: null }, () => PATHS.resolve());
+  ok('DATA_FILE задан — путь берётся из переменной', explicit.file === '/tmp/kosatka-explicit/db.json' && explicit.source === 'DATA_FILE', JSON.stringify(explicit));
+  const fromDir = withEnv({ DATA_FILE: null, DATA_DIR: '/tmp/kosatka-dir' }, () => PATHS.resolve());
+  ok('DATA_DIR задан — добавляется db.json', fromDir.file === '/tmp/kosatka-dir/db.json' && fromDir.source === 'DATA_DIR', JSON.stringify(fromDir));
+  /* без переменных путь обязан уйти за пределы репозитория, иначе его
+     затрёт следующий деплой (именно из-за этого пропадали аккаунты) */
+  const auto = withEnv({ DATA_FILE: null, DATA_DIR: null }, () => PATHS.resolve());
+  const insideRepo = auto.file.startsWith(ROOT + path.sep);
+  ok('без переменных база не лежит внутри репозитория', !insideRepo, auto.file);
+  ok('автопуть помечен постоянным', auto.persistent === true, JSON.stringify(auto));
+  /* явный DATA_FILE не должен молча получать чужие данные из старого места */
+  const noInject = withEnv({ DATA_FILE: '/tmp/kosatka-explicit/db.json', DATA_DIR: null }, () => PATHS.migrateIfNeeded({ file: '/tmp/kosatka-explicit/db.json', source: 'DATA_FILE' }));
+  ok('в явно заданный DATA_FILE ничего не подмешивается', noInject === null, String(noInject));
+
   console.log('');
   console.log(`  Пройдено: ${pass}, провалено: ${fail}`);
   process.exit(fail ? 1 : 0);

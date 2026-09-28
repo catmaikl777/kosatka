@@ -16,7 +16,6 @@ const crypto = require('crypto');
 const PORT = +(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = process.env.STATIC_DIR ? path.resolve(process.env.STATIC_DIR) : path.resolve(__dirname, '..');
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 
 /* Списки скинов/эффектов/улучшений нужны серверу, чтобы не принимать
    от клиента выдуманные id. Берём из общей с клиентом data.js. */
@@ -34,10 +33,15 @@ const DATA = (() => {
 const SKIN_IDS = DATA ? new Set(DATA.SKINS.map(s => s.id)) : null;
 const EFFECT_IDS = DATA ? new Set(DATA.EFFECTS.map(e => e.id)) : null;
 const UPG_IDS = DATA ? new Set(DATA.UPGRADES.map(u => u.id)) : null;
-const DEFAULT_DB_FILE = path.join(DATA_DIR, 'db.json');
-const DB_FILE = process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : DEFAULT_DB_FILE;
+/* Путь к базе выбирает server/paths.js: переменные DATA_FILE/DATA_DIR имеют
+   приоритет, иначе подбирается постоянный каталог ЗА пределами папки с
+   кодом (иначе деплой затирал бы аккаунты и кланы). */
+const PATHS = require('./paths.js');
+const DB_PATH = PATHS.resolve();
+const DB_FILE = DB_PATH.file;
 const DB_DIR = path.dirname(DB_FILE);
-/* публичный адрес сервиса: платформы передают его по-разному.
+const DB_PERSISTENT = DB_PATH.persistent;
+const DB_MOVED_FROM = PATHS.migrateIfNeeded(DB_PATH);/* публичный адрес сервиса: платформы передают его по-разному.
    Внимание: без скобок '||' перебивает '?:' по приоритету, и при заданном
    PUBLIC_URL/RENDER_EXTERNAL_URL (без FLY_APP_NAME) печатался бы
    https://undefined.fly.dev. */
@@ -268,6 +272,8 @@ const server = http.createServer((req, res) => {
       players: clients.size, accounts: Object.keys(db.accounts).length,
       clans: Object.keys(db.clans).length,
       lobbies: lobbies.size, teams: teams.size,
+      /* dbPersistent: false — базу по-прежнему затирает деплой */
+      dbPersistent: DB_PERSISTENT,
       seasonLeft: Math.max(0, db.seasonEnd - Date.now())
     });
     res.writeHead(closing ? 503 : 200, Object.assign({}, base, { 'Content-Type': 'application/json; charset=utf-8' }));
@@ -1121,13 +1127,14 @@ server.listen(PORT, HOST, () => {
   console.log('      http://localhost:' + PORT);
   console.log('      ws://localhost:' + PORT + '/ws');
   if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
-  console.log('      база: ' + DB_FILE + (DB_FILE === DEFAULT_DB_FILE ? '  ← ЭФЕМЕРНО' : ''));
-  if ((DB_FILE === DEFAULT_DB_FILE && process.env.RENDER) ||
-      (DB_FILE === DEFAULT_DB_FILE && /fly\.dev|up\.railway/.test(ext || ''))) {
+  console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
+  if (DB_MOVED_FROM) {
+    console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
+  }
+  if (!DB_PERSISTENT) {
     console.log('');
-    console.log('  ⚠  Файловая база на этой платформе исчезнет при пересоздании сервиса.');
-    console.log('     Задай DATA_FILE на постоянном диске (Render: disk, Fly: volume,');
-    console.log('     Railway: volume) — иначе аккаунты и кланы пропадут.');
+    console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
+    console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');
   }
   console.log('      Ctrl+C — остановить');
   console.log('');
