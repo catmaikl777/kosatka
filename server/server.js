@@ -37,6 +37,7 @@ const UPG_IDS = DATA ? new Set(DATA.UPGRADES.map(u => u.id)) : null;
    приоритет, иначе подбирается постоянный каталог ЗА пределами папки с
    кодом (иначе деплой затирал бы аккаунты и кланы). */
 const PATHS = require('./paths.js');
+const BACKUP = require('./backup.js');
 const DB_PATH = PATHS.resolve();
 const DB_FILE = DB_PATH.file;
 const DB_DIR = path.dirname(DB_FILE);
@@ -286,6 +287,15 @@ const server = http.createServer((req, res) => {
       /* доступные для записи каталоги на ОТДЕЛЬНОЙ ФС — если платформа
          подключила том, но DATA_FILE смотрит в образ, вент здесь */
       dbVolumes: PATHS.volumes(),
+      /* состояние бэкапа: on=false — бэкап не настроен, тогда аккаунты
+         переживут рестарт только при наличии тома */
+      backup: {
+        on: backup.state.on,
+        last: backup.state.last,
+        error: backup.state.error,
+        pushes: backup.state.pushes,
+        restores: backup.state.restores
+      },
       seasonLeft: Math.max(0, db.seasonEnd - Date.now())
     });
     res.writeHead(closing ? 503 : 200, Object.assign({}, base, { 'Content-Type': 'application/json; charset=utf-8' }));
@@ -1131,36 +1141,76 @@ function fixRaidOwner(t) {
   }
 }
 
+/* Запоминаем ДО loadDb(): loadDb создаёт файл, если его не было,
+   и «файл есть» после неё означало бы всегда «база не потеряна». */
+const DB_EXISTED = fs.existsSync(DB_FILE);
 loadDb();
-server.listen(PORT, HOST, () => {
-  const ext = PUBLIC_URL || (HOST === '0.0.0.0' || HOST === '::' ? null : HOST);
-  console.log('');
-  console.log('  🐋  PIXEL ORCA — сервер запущен');
-  console.log('      http://localhost:' + PORT);
-  console.log('      ws://localhost:' + PORT + '/ws');
-  if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
-  console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
-  console.log('      путь выбран: ' + DB_PATH.source +
-    (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
-  if (DB_BORN && DB_BORN.first) {
-    console.log('      этот диск живёт с: ' + DB_BORN.first);
-  }
-  if (DB_MOVED_FROM) {
-    console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
-  }
-  if (!DB_PERSISTENT) {
-    console.log('');
-    console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
-    console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');
-  } else if (DB_SAME_FS === true) {
-    console.log('');
-    console.log('  ⚠  Каталог базы — часть образа, а не подключённый том.');
-    console.log('     Если деплой пересоздаёт контейнер, аккаунты пропадут.');
-    console.log('     Проверь /api/health после редеплоя: поле dbFirst должно сохраниться.');
-  }
-  console.log('      Ctrl+C — остановить');
-  console.log('');
+
+/* ---- бэкап в приватный репозиторий GitHub ----
+   Если файла базы не было (деплой без тома) — воскрешаем её из снимка,
+   иначе игроки зашли бы в пустой мир. Дальше снимок уходит сам. */
+const backup = BACKUP.create({
+  getJson: function () { return JSON.stringify(db); },
+  applyJson: function (raw) { Object.assign(db, JSON.parse(raw)); }
 });
+if (backup.config && backup.config.on) {
+  console.log('  бэкап базы: ' + backup.config.repo + ' → ' + backup.config.path +
+    ' (каждые ' + Math.round(backup.config.everyMs / 1000) + ' с)');
+} else if (backup.state.error) {
+  console.log('  бэкап базы выключен: ' + backup.state.error);
+}
+
+/* Старт не должен зависеть от GitHub: даже если сеть лежит, сервер
+   поднимается (пусть с пустой базой) — иначе платформа убьёт инстанс. */
+function boot() {
+  server.listen(PORT, HOST, function () {
+    const ext = PUBLIC_URL || (HOST === '0.0.0.0' || HOST === '::' ? null : HOST);
+    console.log('');
+    console.log('  🐋  PIXEL ORCA — сервер запущен');
+    console.log('      http://localhost:' + PORT);
+    console.log('      ws://localhost:' + PORT + '/ws');
+    if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
+    console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
+    console.log('      путь выбран: ' + DB_PATH.source +
+      (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
+    if (DB_BORN && DB_BORN.first) {
+      console.log('      этот диск живёт с: ' + DB_BORN.first);
+    }
+    if (DB_MOVED_FROM) {
+      console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
+    }
+    if (!DB_PERSISTENT) {
+      console.log('');
+      console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
+      console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');
+    } else if (DB_SAME_FS === true) {
+      console.log('');
+      console.log('  ⚠  Каталог базы — часть образа, а не подключённый том.');
+      console.log('     Если деплой пересоздаёт контейнер, аккаунты пропадут.');
+      if (backup.config && backup.config.on) {
+        console.log('     Спасает бэкап: ' + backup.config.repo + ' — аккаунты восстановятся при старте.');
+      } else {
+        console.log('     Спасает только бэкап: задай BACKUP_REPO и BACKUP_TOKEN.');
+      }
+    }
+    console.log('      Ctrl+C — остановить');
+    console.log('');
+  });
+}
+
+if (backup.config && backup.config.on && !DB_EXISTED) {
+  backup.restore().then(function (restored) {
+    if (restored) {
+      console.log('  ✔ база восстановлена из бэкапа: аккаунтов ' +
+        Object.keys(db.accounts).length + ', кланов ' + Object.keys(db.clans).length);
+    }
+    backup.start();
+    boot();
+  });
+} else {
+  if (backup.config && backup.config.on) backup.start();
+  boot();
+}
 
 /* ================= Мягкое завершение (PaaS деплоит через SIGTERM) =================
    Пока идёт деплой, новые соединения не принимаем, существующие рвём, базу пишем. */
@@ -1173,6 +1223,20 @@ function shutdown(signal) {
   for (const c of [...clients]) { try { c.socket.destroy(); } catch (e) { /* ignore */ } }
   clients.clear();
   try { writeDb(); } catch (e) { console.error('[db] не сохранилась:', e.message); }
+  /* снимок в GitHub — страховка от wipe; ждём недолго, но успеваем */
+  if (backup.config && backup.config.on) {
+    backup.stop();
+    /* страховка: если сеть/GitHub завис, всё равно выходим — платформа
+       даёт на завершение считанные секунды и потом убивает процесс */
+    const bye = function () { console.log('[boot] готово, до свидания.'); process.exit(0); };
+    const guard = setTimeout(bye, 9000);
+    if (guard.unref) guard.unref();
+    backup.flush(true)
+      .then((ok) => { if (ok) console.log('[backup] снимок сохранён в ' + backup.config.repo); })
+      .catch(() => { /* ошибка уже в backup.state */ })
+      .then(bye);
+    return;
+  }
   console.log('[boot] готово, до свидания.');
   process.exit(0);
 }

@@ -354,7 +354,7 @@ async function main() {
   try { HACK.close(); SAVE.close(); } catch (e) { /* необязательно */ }
 }
 
-main().then(() => {
+main().then(async () => {
   /* ---------- выбор пути к базе (server/paths.js) ---------- */
   const PATHS = require(path.join(ROOT, 'server', 'paths.js'));
   const withEnv = (env, fn) => {
@@ -391,6 +391,97 @@ main().then(() => {
     ok('сверка ФС базы и кода возвращает булево значение', same === true || same === false || same === null, String(same));
     const vols = PATHS.volumes();
     ok('поиск томов возвращает массив путей на отдельной ФС', Array.isArray(vols), JSON.stringify(vols));
+  }
+
+  /* ---------- бэкап базы в репозиторий GitHub (server/backup.js) ----------
+     Сеть не трогаем: подменяем fetch, поэтому проверяем всю логику —
+     конфиг, чтение снимка, запись и то, что при ошибке сервер не падает. */
+  {
+    const BACKUP = require(path.join(ROOT, 'server', 'backup.js'));
+    const ENV = { BACKUP_REPO: 'me/kosatka-data', BACKUP_TOKEN: 'ghp_x' };
+
+    ok('без переменных бэкап выключен', BACKUP.readConfig({}).on === false);
+    ok('одна переменная из пары — бэкап выключен с предупреждением',
+      BACKUP.readConfig({ BACKUP_REPO: 'me/x' }).on === false &&
+      !!BACKUP.readConfig({ BACKUP_REPO: 'me/x' }).warn);
+    ok('кривое имя репозитория отклоняется',
+      BACKUP.readConfig({ BACKUP_REPO: 'нет слеша', BACKUP_TOKEN: 't' }).on === false);
+    const c = BACKUP.readConfig(ENV);
+    ok('конфиг собран из переменных', c.on && c.repo === 'me/kosatka-data' &&
+      c.path === 'db.json' && c.branch === 'main', JSON.stringify({ r: c.repo, p: c.path }));
+
+    /* фейковый GitHub: GET отдаёт снимок, PUT его принимает */
+    const calls = [];
+    let stored = null;
+    const fakeOk = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    const fetchImpl = async (url, opt) => {
+      calls.push({ url: url, opt: opt });
+      if (!opt || opt.method === 'PUT') {
+        const b = JSON.parse(opt.body);
+        stored = { sha: 'sha2', content: b.content };
+        return fakeOk({ content: { sha: 'sha2' } });
+      }
+      if (!stored) return { ok: false, status: 404, json: async () => ({}), text: async () => 'Not Found' };
+      return fakeOk(stored);
+    };
+
+    const b1 = BACKUP.create({
+      env: ENV, fetchImpl: fetchImpl,
+      getJson: () => JSON.stringify({ accounts: { a: 1 } }),
+      applyJson: (raw) => { b1.applied = JSON.parse(raw); }
+    });
+    const restored = await b1.restore();
+    ok('пустой снимок (404) — это не ошибка, restore возвращает null',
+      restored === null && b1.state.error === null, JSON.stringify(b1.state));
+
+    stored = { sha: 'sha1', content: Buffer.from(JSON.stringify({ accounts: { u1: 1 } })).toString('base64') };
+    let applied = null;
+    const b2 = BACKUP.create({
+      env: ENV, fetchImpl: fetchImpl,
+      getJson: () => JSON.stringify({ accounts: {} }),
+      applyJson: (raw) => { applied = JSON.parse(raw); }
+    });
+    ok('база восстанавливается из снимка', (await b2.restore()) === true &&
+      applied && applied.accounts && applied.accounts.u1 === 1, JSON.stringify(applied));
+
+    let db = { accounts: { u1: 1 } };
+    const b3 = BACKUP.create({
+      env: ENV, fetchImpl: fetchImpl,
+      getJson: () => JSON.stringify(db),
+      applyJson: (raw) => { db = JSON.parse(raw); }
+    });
+    await b3.restore();
+    db = { accounts: { u1: 1, u2: 2 } };   /* база разошлась со снимком */
+    const pushed = await b3.flush(false);
+    const put = calls.filter((x) => x.opt && x.opt.method === 'PUT');
+    ok('изменённая база уходит в репозиторий', pushed === true && put.length >= 1, String(put.length));
+    ok('тело PUT содержит base64 и ветку', (() => {
+      const b = JSON.parse(put[0].opt.body);
+      return b.branch === 'main' && Buffer.from(b.content, 'base64').toString('utf8').indexOf('accounts') >= 0;
+    })());
+    ok('токен уходит в заголовке, а не в URL', /Bearer gh/.test(put[0].opt.headers.Authorization) &&
+      put[0].url.indexOf('ghp_x') < 0, put[0].url);
+
+    const before = calls.length;
+    ok('неизменившаяся база повторно не выкладывается', (await b3.flush(false)) === false &&
+      calls.length === before, String(calls.length - before));
+    ok('принудительная выкладка на SIGTERM всё равно пишет',
+      (await b3.flush(true)) === true && calls.length > before);
+
+    /* сеть/GitHub лежит — сервер обязан продолжать работать */
+    const broken = BACKUP.create({
+      env: ENV,
+      fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => 'Bad credentials' }),
+      getJson: () => '{}'
+    });
+    ok('ошибка GitHub не бросается наружу, а попадает в state',
+      (await broken.restore()) === null && /401/.test(broken.state.error || ''), String(broken.state.error));
+    ok('после ошибки flush тоже не бросает', (await broken.flush(false)) === false);
+    ok('таймер бэкапа не мешает выходу процесса', (() => {
+      const t = b3.start();
+      b3.stop();
+      return t === null || t.hasRef() === false;
+    })());
   }
 
   console.log('');

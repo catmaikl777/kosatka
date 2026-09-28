@@ -9,11 +9,12 @@
     "build": "node tools/prepare-pages.mjs",
     "preview": "node tools/serve-pages.mjs",
     "icons": "node tools/make-icons.mjs",
-    "test": "npm run test:check && npm run test:sprites && npm run test:client && npm run test:server && npm run test:online",
+    "test": "npm run test:check && npm run test:sprites && npm run test:client && npm run test:server && npm run test:backup && npm run test:online",
     "test:check": "node tools/checkclient.mjs",
     "test:sprites": "node tools/checksprites.mjs",
     "test:client": "node tools/smoke-client.mjs",
     "test:server": "node tools/smoke-server.mjs",
+    "test:backup": "node tools/smoke-backup.mjs",
     "test:online": "node tools/smoke-online.mjs",
     "test:dist": "node tools/prepare-pages.mjs && PO_DIR=dist node tools/smoke-online.mjs"
   },
