@@ -497,11 +497,44 @@ const waitLoot = async (ms = 6000) => {
    rolling. Иначе следующий openBox() молча игнорируется и каскадом ломает
    все тесты ниже. */
 const settle = async () => {
-  await waitLoot();
-  const x = openDialogs().pop() && openDialogs().pop().querySelector('[data-close]');
-  if (x) x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+  /* Закрываем окна и ЖДЁМ конца анимации (всё оканчивается на 1690мс).
+     Раньше здесь был клик по «×», но waitLoot() видел лот от ПРЕДЫДУЩЕГО
+     бокса и кликал по ещё не открывшемуся — тест проверял не то. */
   UI.closeAll();
+  await sleep(2200);
 };
+/* Открыть бокс и получить ИМЕННО его окно. Пока идёт чужая анимация,
+   openBox выходит молча (rolling), поэтому ждём и пробуем снова. */
+const openBoxFresh = async (id) => {
+  for (let i = 0; i < 80; i++) {
+    const n = ST.state.stats.boxesOpened;
+    SHOP.openBox(id);
+    if (ST.state.stats.boxesOpened !== n) return openDialogs().pop();
+    await sleep(50);
+  }
+  return null;
+};
+/* Снимок всего, что может выдать бокс. Раньше тест смотрел только на
+   косатки/рыбу/ракушки/билеты/эффекты, а «Ящик кальмара» вполне может
+   выдать xp (8%), скин (4%) или бафф (2%) — тогда все измеренные цифры
+   не менялись и тест падал случайно, хотя лот выдавался правильно. */
+const lootSnapshot = () => ({
+  coins: ST.state.coins, fish: ST.state.fish, shells: ST.state.shells,
+  tickets: ST.state.eventTickets, xp: ST.state.xp,
+  skins: ST.state.skinsOwned.length, effects: ST.state.effectsOwned.length,
+  /* бафф лежит в state.buff (объект mult/until), а НЕ в массиве buffs */
+  buff: ST.state.buff ? ST.state.buff.mult + '@' + ST.state.buff.until : 'нет',
+  level: ST.state.level
+});
+const fmtSnap = (s) => `${s.coins}🐋/${s.fish}🐟/${s.shells}🐚/${s.tickets}🎫/${Math.round(s.xp)}xp/${s.skins}скин/${s.effects}эфф/бафф=${s.buff}`;
+/* Лот выдан, если изменилось что-то, кроме чистого списания цены бокса */
+const lootGranted = (before, after, boxCost) =>
+  (after.coins - before.coins + boxCost) > 0 || after.fish !== before.fish ||
+  after.shells !== before.shells || after.tickets !== before.tickets ||
+  after.xp !== before.xp || after.skins !== before.skins ||
+  after.effects !== before.effects || after.buff !== before.buff ||
+  after.level !== before.level;
+
 const boxId = DATA.BOXES[0].id;
 const r = SHOP.openBox(boxId);
 ok('бокс открывается (списание + счётчик)', ST.state.stats.boxesOpened === boxesBefore + 1 && ST.state.coins < 1e12,
@@ -523,32 +556,27 @@ await settle();
 /* --- закрытие модалки бокса до кульминации: добыча не теряется --- */
 ST.state.coins = 1e12;
 const BOX0 = DATA.BOXES[0];
-const fishBefore = ST.state.fish, shellsBefore = ST.state.shells;
-const ticketsBefore = ST.state.eventTickets, fxBefore = ST.state.effectsOwned.length;
+const snapBefore = lootSnapshot();
 const openedBefore = ST.state.stats.boxesOpened;
-const coinsBeforeCut = ST.state.coins;
-SHOP.openBox(BOX0.id);
+const boxModal = await openBoxFresh(BOX0.id);
 /* сцену берём из ОТКРЫТОГО окна: закрытые ещё 200мс висят в DOM,
    иначе клик ушёл бы в модалку от предыдущего теста */
-const boxModal = openDialogs().pop();
 const stage = boxModal && boxModal.querySelector('.box-stage');
-ok('фаза интриги показана до взрыва', !!stage, 'нет .box-stage в открытом окне');
+ok('бокс открылся и показал фазу интриги', !!stage, 'нет .box-stage в открытом окне');
 if (stage) {
   /* жмём «×» — как будто игрок передумал, не дожидаясь взрыва */
   const closeBtn = boxModal.querySelector('[data-close]');
   ok('у модалки бокса есть кнопка закрытия', !!closeBtn);
   if (closeBtn) closeBtn.dispatchEvent({ type: 'click', target: closeBtn, bubbles: true });
 }
-/* бокс оплачен, значит выигрыш считаем за вычетом его стоимости:
-   иначе выпавшие косатки «съедают» списание и тест врёт */
-const netCoins = ST.state.coins - coinsBeforeCut + BOX0.cost;
-ok('стоимость бокса списана при досрочном закрытии', netCoins >= 0,
-  `${coinsBeforeCut} → ${ST.state.coins}, цена=${BOX0.cost}`);
+const snapAfter = lootSnapshot();
+/* цена бокса обязана списаться даже при досрочном закрытии */
+ok('стоимость бокса списана при досрочном закрытии',
+  snapAfter.coins - snapBefore.coins + BOX0.cost >= 0,
+  `${fmtSnap(snapBefore)} → ${fmtSnap(snapAfter)}, цена=${BOX0.cost}`);
 ok('при досрочном закрытии лот всё равно выдан',
-  ST.state.stats.boxesOpened === openedBefore + 1 &&
-  (netCoins > 0 || ST.state.fish !== fishBefore || ST.state.shells !== shellsBefore ||
-   ST.state.eventTickets !== ticketsBefore || ST.state.effectsOwned.length !== fxBefore),
-  `boxes=${ST.state.stats.boxesOpened}, лут=${netCoins}🐋/${ST.state.fish}🐟/${ST.state.shells}🐚/${ST.state.eventTickets}🎫`);
+  ST.state.stats.boxesOpened === openedBefore + 1 && lootGranted(snapBefore, snapAfter, BOX0.cost),
+  `boxes ${openedBefore}→${ST.state.stats.boxesOpened}, ${fmtSnap(snapBefore)} → ${fmtSnap(snapAfter)}`);
 /* и боксы снова открываются: rolling не залип */
 const openedAfter = ST.state.stats.boxesOpened;
 SHOP.openBox(BOX0.id);
@@ -558,14 +586,15 @@ await settle();
 
 /* --- регресс: закрытие ПОСЛЕ показа лута не выдаёт второй бонус --- */
 ST.state.coins = 1e12;
-SHOP.openBox(BOX0.id);
+const lastBox = await openBoxFresh(BOX0.id);
+ok('бокс для регресса открылся', !!lastBox, 'openBox не сработал');
 ok('после всех фаз показан лот', await waitLoot(), 'лот не показан');
 /* Замер делаем ПОСЛЕ выдачи лота: бокс законно что-то роняет, а вот закрытие
-   окна не должно добавить ещё — иначе бокс можно «фармить», не дожидаясь взрыва. */
-const boxesAfter = ST.state.stats.boxesOpened;
-const fishAfter = ST.state.fish, shellsAfter = ST.state.shells, coinsAfter = ST.state.coins;
+   окна не должно добавить ещё — иначе бокс можно «фармить», не дожидаясь взрыва.
+   Снимок полный (включая xp/скины/баффы), иначе лишний опыт был бы незаметен. */
+const snapDone = lootSnapshot();
 const doneLoot = openDialogs().pop();
-ok('бокс засчитан ровно один раз', boxesAfter > 0, String(boxesAfter));
+ok('бокс засчитан ровно один раз', ST.state.stats.boxesOpened > 0, String(ST.state.stats.boxesOpened));
 if (doneLoot) {
   const x = doneLoot.querySelector('[data-close]');
   ok('после открытия лута кнопка «×» на месте', !!x);
@@ -575,10 +604,10 @@ if (doneLoot) {
     x.dispatchEvent({ type: 'click', target: x, bubbles: true });
   }
 }
+const snapClosed = lootSnapshot();
 ok('закрытие окна лута не выдаёт дополнительную добычу',
-  ST.state.stats.boxesOpened === boxesAfter &&
-  ST.state.fish === fishAfter && ST.state.shells === shellsAfter && ST.state.coins === coinsAfter,
-  `boxes ${boxesAfter}→${ST.state.stats.boxesOpened}, fish ${fishAfter}→${ST.state.fish}, shells ${shellsAfter}→${ST.state.shells}, coins ${coinsAfter}→${ST.state.coins}`);
+  fmtSnap(snapDone) === fmtSnap(snapClosed),
+  `${fmtSnap(snapDone)} → ${fmtSnap(snapClosed)}`);
 UI.closeAll();
 
 /* --- утечка DOM: closeAll обязан удалять окна modalShell, а не прятать их.
