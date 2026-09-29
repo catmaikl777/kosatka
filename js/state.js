@@ -95,6 +95,9 @@
     var settings = state.settings;
     var merged = merge(D.freshState(), cloud);
     merged.account = acc;
+    /* владельцем устройства становится вошедший аккаунт (переживает
+       logout и связывает перезагрузку после загрузки облака) */
+    merged.lastAccount = (acc && acc.id != null) ? { id: acc.id, name: acc.name } : (state.lastAccount || null);
     merged.settings = settings;
     merged.clan = Object.assign({ id: null, name: null, role: null, joined: 0 }, merged.clan || {});
     merged.lastSave = Date.now();

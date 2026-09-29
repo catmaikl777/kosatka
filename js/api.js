@@ -31,11 +31,11 @@
     return { url: serverUrl(), source: (root.PO_CONFIG && root.PO_CONFIG.server) ? 'config' : (root.PO_SERVER ? 'hook' : 'same-origin') };
   }
 
-  function emit(ev, data) {
+  function emit(ev, data, x2, x3) {
     var list = handlers[ev];
     if (!list) return;
     for (var i = 0; i < list.length; i++) {
-      try { list[i](data); } catch (e) { console.error('[api]', ev, e); }
+      try { list[i](data, x2, x3); } catch (e) { console.error('[api]', ev, e); }
     }
   }
   function on(ev, fn) {
@@ -94,14 +94,24 @@
         else p.res(msg);
       }
       if (msg.t === 'auth:ok') {
-        me = msg.account;
-        if (root.ST) {
-          root.ST.state.account.name = me.name;
-          root.ST.state.account.token = msg.token;
-          root.ST.state.account.id = me.id;
-          root.ST.save();
+        /* прежняя личность и «хозяин» устройства ДО входа: по ним решаем,
+           был ли локальный прогресс СВОИМ этого аккаунта или
+           чужим/гостевым (auth:ok ещё не перезаписал их) */
+        var prevAcc = root.ST ? Object.assign({}, root.ST.state.account) : { name: null, token: null, id: null };
+        var prevLast = root.ST && root.ST.state.lastAccount ? Object.assign({}, root.ST.state.lastAccount) : { id: null, name: null };
+        if (msg.account) {
+          me = msg.account;
+        } else {
+          /* это ответ на auth:logout — владельца нет, список аккаунта
+             очищает сам logout() */
+          me = null;
+          return;
         }
-        emit('account', me);
+        root.ST.state.account.name = me.name;
+        root.ST.state.account.token = msg.token;
+        root.ST.state.account.id = me.id;
+        root.ST.save();
+        emit('account', me, prevAcc, prevLast);
       }
       if (msg.t === 'auth:err') {
         if (root.ST) { root.ST.state.account.token = null; root.ST.save(); }

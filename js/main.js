@@ -45,7 +45,9 @@
     /* рефреш */
     setInterval(function () { paintHUD(); root.SHOP.tick(); }, 120);
     setInterval(function () {
-      if (api.online && api.account) api.pushSave(ST.state);
+      /* автосейв не трогает облако, пока синк после входа не решён:
+         иначе в аккаунт успевает уехать гостевой сейв устройства */
+      if (api.online && api.account && cloudSynced) api.pushSave(ST.state);
       else ST.save();
     }, 20000);
     window.addEventListener('beforeunload', function () { ST.flush(); });
@@ -182,43 +184,44 @@
   }
 
   /* ---------- статус соединения ---------- */
+  var cloudSynced = false;
   function wireStatus() {
-    api.on('account', function (a) {
+    api.on('account', function (a, prev, prevLast) {
       var el = document.getElementById('accName');
       set(el, a ? '@' + a.name : 'Гость · прогресс только на этом устройстве');
       paintHUD();
-      if (a) {
-        /* подтягиваем облачное сохранение и решаем, чьё брать */
-        api.pullSave().then(function (cloud) {
-          var localCoins = ST.state.totalCoins;
-          if (!cloud) { api.pushSave(ST.state); return; }
-          var cloudCoins = (cloud.stats && cloud.coins) || cloud.coins || 0;
-          if (cloudCoins > localCoins * 1.2) {
-            UI.confirm('Загрузить облачный прогресс?',
-              'В облаке: ' + ST.fmt(cloudCoins) + ' всего, на устройстве: ' + ST.fmt(localCoins) + '. Загрузить облако?',
-              'Загрузить').then(function (y) {
-                if (!y) { api.pushSave(ST.state); return; }
-                /* применяем облачный сейв и пересобираем экран с нового
-                   состояния. Раньше здесь был location.reload() и
-                   window.__cloudState, который reload стирал — облако
-                   фактически никогда не загружалось. */
-                ST.fromCloud(cloud);
-                location.reload();
-              });
-          } else if (localCoins > cloudCoins * 1.2) {
-            UI.confirm('Устройство богаче облака',
-              'На устройстве: ' + ST.fmt(localCoins) + ' всего, в облаке: ' + ST.fmt(cloudCoins) + '. Оставить устройство и перезаписать облако?',
-              'Оставить устройство').then(function (y) {
-                if (y) { api.pushSave(ST.state); return; }
-                ST.fromCloud(cloud);
-                location.reload();
-              });
-          } else {
-            /* прогресс сопоставим — держим устройство и синхронизируемся */
-            api.pushSave(ST.state);
-          }
-        });
-      }
+      if (!a) { cloudSynced = false; return; }
+      /* аккаунт вошёл/вернулся — подтягиваем облачный сейв.
+         Правила без диалогов:
+         • облака ещё нет (первый вход) — гость становится аккаунтом;
+         • устройство уже было ЭТИМ аккаунтом — синхронизируем локаль
+           вверх (это свежайшие данные того же аккаунта);
+         • на устройстве чужой/гостевой прогресс — данные аккаунта
+           авторитетны: грузим их и НЕ даём гостевым косадкам ни
+           попасть в аккаунт, ни перезаписать облако. */
+      api.pullSave().then(function (cloud) {
+        var sameDevice = a && prevLast && prevLast.id === a.id;
+        if (!cloud || typeof cloud !== 'object') {
+          cloudSynced = true;
+          ST.state.lastAccount = { id: a.id, name: a.name };
+          ST.save(true);
+          api.pushSave(ST.state);
+          return;
+        }
+        if (sameDevice) {
+          cloudSynced = true;
+          ST.state.lastAccount = { id: a.id, name: a.name };
+          ST.save(true);
+          api.pushSave(ST.state);
+          return;
+        }
+        /* чужой/гостевой прогресс на устройстве: грузим облако аккаунта.
+           Раньше 20-секундный автосейв успевал записать гостевой сейв в
+           аккаунт до сверки (отсюда «в аккаунт записались гостевые
+           косатки»); теперь автосейв заморожен, пока синк не решён */
+        ST.fromCloud(cloud);
+        location.reload();
+      });
     });
     api.on('clan', function () { paintHUD(); });
     api.on('authError', function (m) { UI.toast('Ошибка входа: ' + m, 'bad', 'i_lock'); });

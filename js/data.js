@@ -375,6 +375,10 @@
         showDamage: true, backdrop: 'dark'
       },
       account: { name: null, token: null, id: null },
+      /* «хозяин» устройства — последний аккаунт, что входил. Переживает
+         выход (logout): по нему отличаем свой прогресс аккаунта от
+         чужого/гостевого при повторном входе. */
+      lastAccount: null,
       clan: { id: null, name: null, role: null, joined: 0 }
     };
   }

@@ -434,33 +434,50 @@ ok('клиент C: сервер вернул того же игрока',
 ok('при равном прогрессе клиент не спрашивает про облако (лишних вопросов нет)',
   C.doc.querySelector('[data-act="yes"]') === null, 'появилось окно подтверждения');
 
-/* новый девайс: вход по паролю → предлагает забрать облачный прогресс */
+/* новый девайс: вход по паролю → гость, данные аккаунта авторитетны */
 const E = makeClient('E');
 for (let i = 0; i < 40 && E.sb.API.status !== 'online'; i++) await sleep(100);
 ok('клиент E: подключился (новое устройство)', E.sb.API.status === 'online', E.sb.API.status);
 ok('у нового клиента пустой прогресс', E.sb.ST.state.coins === 0, String(E.sb.ST.state.coins));
 E.sb.API.login('Косатка', 'orcapass1').catch((e) => console.log('    ! login error: ' + e.message));
-await sleep(400);
-if (!E.sb.API.account) console.log('    ! E не авторизован, error=' + E.sb.API.error);
-let t0 = Date.now();
-let confirmBtn = null;
-while (Date.now() - t0 < 6000 && !confirmBtn) {
-  confirmBtn = E.doc.querySelector('[data-act="yes"]');
-  if (!confirmBtn) await sleep(100);
-}
-ok('клиент E: предложено загрузить облачный прогресс', !!confirmBtn);
-console.log('    · жмём «Загрузить»…');
-if (confirmBtn) { confirmBtn.click(); await sleep(400); }
-ok('клиент E: облачный сейв применён (1.23M > локальных 0)',
+let t1 = Date.now();
+while (Date.now() - t1 < 8000 && E.sb.ST.state.totalCoins !== coinsPush) await sleep(100);
+ok('клиент E: облачный сейв применён сам (1.23M > локальных 0)',
   E.sb.ST.state.coins === coinsPush || E.sb.ST.state.totalCoins === coinsPush,
   `coins=${E.sb.ST.state.coins}, total=${E.sb.ST.state.totalCoins}`);
 ok('клиент E: личность входа сохранена после загрузки облака',
   E.sb.ST.state.account.name === 'Косатка', JSON.stringify(E.sb.ST.state.account));
-console.log('    · нажали, reload=' + E.sb.location.reloaded);
-ok('после «Загрузить» клиент перезагружает страницу с новым сейвом', E.sb.location.reloaded === true, String(E.sb.location.reloaded));
+ok('клиент E: страница перезагружена с новым сейвом', E.sb.location.reloaded === true, String(E.sb.location.reloaded));
 ok('вход по паролю создал тот же аккаунт',
   !!(E.sb.API.account && A.sb.API.account && E.sb.API.account.id === A.sb.API.account.id),
   `${E.sb.API.account?.id} vs ${A.sb.API.account?.id}`);
+ok('клиент E: гостевой прогресс НЕ записался в аккаунт',
+  E.sb.ST.state.totalCoins === coinsPush && /NaN|undefined/.test(String(E.sb.ST.state.totalCoins)) === false,
+  `total=${E.sb.ST.state.totalCoins}`);
+await sleep(300);
+ok('клиент E: автосейв не пишет в облако до синка (диалогов нет)',
+  E.doc.querySelector('[data-act="yes"]') === null, 'всплыло окно подтверждения');
+
+/* тот же аккаунт, то же устройство: локальный прогресс НЕ беднее облака,
+   он его свежее — при повторном входе синхронизируем вверх, а не
+   выбрасываем перезагрузкой */
+E.sb.ST.state.coins = coinsPush + 111;
+E.sb.ST.state.totalCoins = coinsPush + 111;
+E.sb.ST.flush();
+E.sb.ST.state.coins = coinsPush + 111;
+E.sb.ST.state.totalCoins = coinsPush + 111;
+E.sb.ST.flush();
+await E.sb.API.logout();
+waitEvent(E, 'account', 4000).catch(() => null);
+E.sb.API.login('Косатка', 'orcapass1').catch(() => {});
+let t2 = Date.now();
+let pushedBack = false;
+while (Date.now() - t2 < 8000 && !pushedBack) {
+  await sleep(150);
+  pushedBack = (await A.sb.API.pullSave().catch(() => null) || {}).totalCoins === coinsPush + 111;
+}
+ok('повторный вход того же аккаунта синхронизирует локаль вверх',
+  pushedBack === true, 'облако не получило свежий локальный прогресс');
 
 /* независимый клиент B (без токена) тоже подключается */
 const B = makeClient('B');
