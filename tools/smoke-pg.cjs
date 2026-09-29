@@ -6,6 +6,7 @@
 'use strict';
 const path = require('path');
 const assert = require('assert');
+const fs = require('fs');
 
 /* ---- маленький фейк пула поверх массивов-таблиц ---- */
 let lastFake = null;
@@ -67,6 +68,55 @@ function makeFake(seed) {
 }
 function FakePool() { lastFake = makeFake(global.__pgseed || {}); return lastFake.pool; }
 
+/* Сканер вызовов .query( в исходнике: возвращает [{line, args}].
+   Пропускает комментарии и строковые литералы — в SQL запятые есть
+   ('VALUES ($1,$2),($3,$4)'), и без этого разбор посчитал бы их аргументами. */
+function scanQueryCalls(src) {
+  const out = [];
+  const n = src.length;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2; continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const q = c; i++;
+      while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+      i++; continue;
+    }
+    if (c === '.' && src.slice(i, i + 7) === '.query(') {
+      const open = i + 6;
+      let depth = 0, commas = 0, hasValue = false;
+      let k = open;
+      for (; k < n; k++) {
+        const ch = src[k];
+        if (ch === "'" || ch === '"' || ch === '`') {
+          const q = ch; k++;
+          while (k < n && src[k] !== q) { if (src[k] === '\\') k++; k++; }
+          if (depth === 1) hasValue = true;
+          continue;
+        }
+        if (ch === '/' && src[k + 1] === '/') { while (k < n && src[k] !== '\n') k++; continue; }
+        if (ch === '/' && src[k + 1] === '*') { k += 2; while (k < n && !(src[k] === '*' && src[k + 1] === '/')) k++; k++; continue; }
+        if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+        if (ch === ')' || ch === ']' || ch === '}') { depth--; if (depth === 0) break; continue; }
+        if (ch === ',' && depth === 1) { commas++; continue; }
+        if (depth === 1 && !/\s/.test(ch)) hasValue = true;
+      }
+      if (hasValue) commas++;
+      out.push({ line: src.slice(0, open).split('\n').length, args: commas });
+      i = k;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
 const pgMock = { Pool: FakePool, types: { setTypeParser() {} } };
 /* Подменяем require('pg') целиком, а не правим require.cache: тест должен
    проходить и без установленного драйвера (проверяем логику хранилища,
@@ -91,6 +141,28 @@ function writes(fake) { return fake.queries.filter((x) => /^(INSERT|DELETE)/i.te
 
 (async function main() {
   console.log('\n\x1b[1mPostgreSQL-хранилище\x1b[0m');
+
+  /* --- СТАТИЧЕСКАЯ ПРОВЕРКА: query() нельзя звать с тремя аргументами ---
+     node-pg различает (text) | (text, values) | (text, values, callback).
+     Третий аргумент обязан быть функцией, поэтому СЛУЧАЙНЫЙ лишний массив
+     (например `client.query(sql, ['seq','1'], ['seasonEnd','2'])`) даёт
+     «callback is not a function» и МОЛЧА ломает всю запись в базу.
+     Мок-пул ловит это только на покрытых путях, поэтому дополнительно
+     сканируем исходник целиком. */
+  {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'store-pg.js'), 'utf8');
+    const calls = scanQueryCalls(src);
+    const bad = calls.filter((c) => c.args > 2);
+    ok(!bad.length, `в store-pg.js ни один query() не зовётся с лишним аргументом (вызовов: ${calls.length})`,
+      bad.map((c) => `строка ${c.line}: ${c.args} арг.`).join(' | '));
+    ok(calls.length >= 5, 'сканер действительно нашёл вызовы query в store-pg.js', String(calls.length));
+    /* и живой пример, что мок действительно ловит такой вызов */
+    let threw = null;
+    const fake = makeFake({});
+    try { fake.pool.query('SELECT 1', ['a'], ['b']); } catch (e) { threw = e.message; }
+    ok(threw === 'callback is not a function', 'мок-пул отвергает query() с лишним массивом, как настоящий pg',
+      String(threw));
+  }
 
   /* --- загрузка: аккаунты, кланы, индексы, seq --- */
   {

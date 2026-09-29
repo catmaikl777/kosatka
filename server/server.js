@@ -112,6 +112,8 @@ let saveTimer = null;
 let dbBrokenWarned = false;
 let saveInFlight = null;
 let savePending = false;
+let dbWriteError = null;      /* последняя ошибка записи — для /api/health */
+let dbWriteErrorAt = 0;
 function saveDb(now) {
   if (now) return flushDb();
   if (saveTimer) return null;
@@ -126,8 +128,18 @@ function flushDb() {
   if (saveInFlight) { savePending = true; return saveInFlight; }
   saveInFlight = Promise.resolve()
     .then(function () { return STORE.save(); })
-    .then(function () { dbBrokenWarned = false; }, function (e) {
+    .then(function () { dbBrokenWarned = false; dbWriteError = null; dbWriteErrorAt = 0; }, function (e) {
+      dbWriteError = e.message;
+      dbWriteErrorAt = Date.now();
       console.error('[db] ошибка записи:', e.message);
+      /* «callback is not a function» — это всегда pg и лишний третий
+         аргумент в query(). Значит, на сервере старая копия store-pg.js:
+         подсказываем прямо, потому что ошибка выглядит как проблема БД. */
+      if (/callback is not a function/i.test(e.message || '')) {
+        console.error('[db] Это баг кода, а не базы: server/store-pg.js зовёт query() ' +
+          'с лишним аргументом, и pg принимает его за callback. Обнови код ' +
+          '(git pull) и перезапусти сервер.');
+      }
       if (!dbBrokenWarned) {
         dbBrokenWarned = true;
         console.error('[db] ВНИМАНИЕ: база не сохраняется — прогресс игроков может быть потерян.');
@@ -340,6 +352,10 @@ const server = http.createServer((req, res) => {
       /* непустое поле = сервер просил PostgreSQL, но не смог и тихо
          перешёл на файл. Мониторинг должен это видеть. */
       dbError: STORE_MOD.error() || null,
+      /* последняя ошибка ЗАПИСИ: она важнее ошибки загрузки — база может
+         открыться, а вот сейвы перестать уезжать в PostgreSQL */
+      dbWriteError: dbWriteError,
+      dbWriteErrorAt: dbWriteErrorAt || null,
       dbFirst: (DB_BORN && DB_BORN.first) || null,
       dbSameFs: DB_SAME_FS,
       /* доступные для записи каталоги на ОТДЕЛЬНОЙ ФС — если платформа

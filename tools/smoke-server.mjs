@@ -343,6 +343,11 @@ async function main() {
   const health = await fetch(BASE + '/api/health').then(r => r.json());
   ok('health показывает игроков онлайн', health.players >= 3, JSON.stringify(health));
   ok('health показывает аккаунты', health.accounts >= 3, String(health.accounts));
+  /* мониторинг должен видеть, что сейвы ПЕРЕСТАЛИ уезжать в базу: ошибка
+     записи — не то же, что ошибка загрузки, и раньше была не видна */
+  ok('health показывает ошибку записи (dbWriteError)', 'dbWriteError' in health,
+    JSON.stringify({ dbError: health.dbError, dbWriteError: health.dbWriteError }));
+  ok('база живая — ошибки записи нет', !health.dbWriteError, String(health.dbWriteError));
 
   srv.kill('SIGINT');
   await sleep(600);
