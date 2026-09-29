@@ -500,7 +500,7 @@
     get state() { return state; },
     load: load, save: save, flush: flush, reset: reset,
     fmt: fmt, fmtTime: fmtTime, fmtFullTime: fmtFullTime,
-    up: up, totalUpgrades: totalUpgrades,
+    up: up, uval: uval, totalUpgrades: totalUpgrades,
     perClick: perClick, perSecond: perSecond, autoCps: autoCps, critChance: critChance, critMult: critMult,
     comboMult: comboMult, fishValue: fishValue, luck: luck, xpNeed: xpNeed,
     rank: rank, levelMult: levelMult, shellMult: shellMult, allMult: allMult,

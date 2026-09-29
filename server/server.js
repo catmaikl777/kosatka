@@ -67,6 +67,10 @@ const FLY_URL = process.env.FLY_APP_NAME ? 'https://' + process.env.FLY_APP_NAME
 const PUBLIC_URL = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || FLY_URL || null;
 const MAX_SAVE_BYTES = 512 * 1024;
 const SEASON_MS = +(process.env.SEASON_MS || 30 * 86400000);
+/* Призы сезона (совпадают с client D.EVENT.playerRewards/clanRewards):
+   топ-3 игроков и топ-3 кланов получают косатки, кланы — каждому участнику. */
+const SEASON_PLAYER_REWARDS = [50000, 25000, 10000];
+const SEASON_CLAN_REWARDS = [50000, 25000, 10000];
 const PVP_MS = +(process.env.PVP_MS || 30000);
 const RAID_MS = +(process.env.RAID_MS || 60000);
 const TICK = +(process.env.TICK || 250);
@@ -79,7 +83,8 @@ const db = {
   byName: {},     /* lower(name) -> id */
   clanByCode: {}, /* code -> id */
   seq: 1,
-  seasonEnd: Date.now() + SEASON_MS
+  seasonEnd: Date.now() + SEASON_MS,
+  seasonNum: 1
 };
 
 /* Создаём хранилище: PG или файл. Игровой код работает с объектом db
@@ -559,6 +564,7 @@ function route(c, t, m) {
   if (t === 'lb') return leaderboard(c, m.sort);
   if (t === 'event:info') return eventInfo(c);
   if (t === 'event:exchange') return eventExchange(c, m);
+  if (t === 'event:reward:ok') return eventRewardAck(c);
 
   if (t.indexOf('clan') === 0) return clanRoute(c, t, m, open);
   if (t.indexOf('pvp') === 0) return pvpRoute(c, t, m, open);
@@ -612,7 +618,10 @@ function login(c, acc) {
   send(c, { t: 'auth:ok', rid: c.lastId, token: acc.token, account: accPub(acc) });
   const cl = acc.clanId ? db.clans[acc.clanId] : null;
   send(c, { t: 'clan:state', clan: cl ? clanState(cl, roleIn(cl, acc.id)) : null });
-  send(c, { t: 'event:info', rid: c.lastId, left: Math.max(0, db.seasonEnd - Date.now()), topScore: topSeasonScore() });
+  send(c, { t: 'event:info', rid: c.lastId, left: Math.max(0, db.seasonEnd - Date.now()), topScore: topSeasonScore(), myScore: acc.seasonScore || 0, season: db.seasonNum });
+  if ((acc.pendingReward || 0) > 0) {
+    send(c, { t: 'event:reward', coins: acc.pendingReward, season: db.seasonNum - 1 });
+  }
 }
 function authLogout(c, m) {
   const a = c.acc;
@@ -629,7 +638,11 @@ function saveState(c, m) {
   if (!s) return err(c, 'save', 'сейв отклонён (битый или слишком большой)');
   c.acc.state = s;
   c.acc.skin = norm(s.skin) || 'normal';
-  c.acc.seasonScore = Math.max(0, num(s.eventSeasonScore, 0));
+  /* Очки сезона — ТОЛЬКО серверная истина: копятся обменом билетов
+     (event:exchange), а клиентский сейв их не поднимает. Раньше сейв
+     переносил eventSeasonScore в аккаунт, позволяя поднять рейтинг
+     правкой сейва, а после сброса сезона старые очки заново воскресали
+     на новый сезон. */
   c.acc.savedAt = Date.now();
   /* Членство в клане — ТОЛЬКО серверная истина. Раньше здесь стояло
      `if (s.clan && s.clan.id && !c.acc.clanId) c.acc.clanId = +s.clan.id;`
@@ -658,8 +671,15 @@ function eventInfo(c) {
   send(c, {
     t: 'event:info', rid: c.lastId,
     left: Math.max(0, db.seasonEnd - Date.now()),
-    topScore: topSeasonScore(), players: Object.keys(db.accounts).length
+    topScore: topSeasonScore(), players: Object.keys(db.accounts).length,
+    season: db.seasonNum,
+    myScore: c.acc ? (c.acc.seasonScore || 0) : 0
   });
+}
+/* клиент применил награду сезона → можно списать долг */
+function eventRewardAck(c) {
+  if (c.acc && (c.acc.pendingReward || 0) > 0) { c.acc.pendingReward = 0; saveDb(); }
+  send(c, { t: 'event:reward:ok', rid: c.lastId });
 }
 /* обмен билетов сезона на очки своего клана (1 билет = 10 очков) */
 function eventExchange(c, m) {
@@ -686,6 +706,58 @@ function eventExchange(c, m) {
     seasonScore: c.acc.seasonScore, clan: clanState(cl, roleIn(cl, c.acc.id))
   });
 }
+/* ================= Конец сезона =================
+   Когда таймер сезона истёк, раздаём призы и начинаем новый сезон:
+   - топ-3 игрока по личным очкам → SEASON_PLAYER_REWARDS
+   - топ-3 клана по очкам клана → SEASON_CLAN_REWARDS каждому участнику
+   Награда кладётся в pendingReward аккаунта и уходит клиенту push-ом
+   (event:reward) сразу, если он онлайн, или при следующем входе.
+   Клиент подтверждает получение сообщением event:reward:ok — тогда
+   долг списывается и не выпадет дважды. */
+function findConn(a) {
+  for (const c of clients) if (c.acc === a) return c;
+  return null;
+}
+function paySeason() {
+  const now = Date.now();
+  const players = Object.values(db.accounts)
+    .filter(a => (a.seasonScore || 0) > 0)
+    .sort((x, y) => (y.seasonScore || 0) - (x.seasonScore || 0))
+    .slice(0, SEASON_PLAYER_REWARDS.length);
+  const clanTop = Object.values(db.clans)
+    .filter(cl => (cl.score || 0) > 0)
+    .sort((x, y) => (y.score || 0) - (x.score || 0))
+    .slice(0, SEASON_CLAN_REWARDS.length);
+  const playerTop = players.map((a, i) => ({ name: a.name, score: a.seasonScore || 0, reward: SEASON_PLAYER_REWARDS[i] || 0 }));
+  const clanTopRows = clanTop.map((cl, i) => ({ name: cl.name, score: cl.score || 0, reward: SEASON_CLAN_REWARDS[i] || 0 }));
+  const got = {};
+  players.forEach((a, i) => { const rw = SEASON_PLAYER_REWARDS[i] || 0; if (rw > 0) got[a.id] = (got[a.id] || 0) + rw; });
+  clanTop.forEach((cl, i) => {
+    const rw = SEASON_CLAN_REWARDS[i] || 0;
+    if (rw <= 0) return;
+    for (const mid of cl.members) {
+      const a = db.accounts[mid];
+      if (a) got[mid] = (got[mid] || 0) + rw;
+    }
+  });
+  for (const id in got) {
+    const a = db.accounts[id];
+    if (!a) continue;
+    a.pendingReward = (a.pendingReward || 0) + got[id];
+    const conn = findConn(a);
+    if (conn) send(conn, { t: 'event:reward', coins: got[id], season: db.seasonNum });
+  }
+  for (const k in db.accounts) db.accounts[k].seasonScore = 0;
+  for (const k in db.clans) db.clans[k].score = 0;
+  db.seasonNum = (db.seasonNum || 1) + 1;
+  db.seasonEnd = now + SEASON_MS;
+  saveDb(true);
+  console.log(`[season] сезон #${db.seasonNum - 1} завершён: ${Object.keys(got).length} призов, новый до ${new Date(db.seasonEnd).toISOString()}`);
+  for (const c of [...clients]) send(c, {
+    t: 'event:season:end', season: db.seasonNum - 1, newSeason: db.seasonNum,
+    left: SEASON_MS, players: playerTop, clans: clanTopRows
+  });
+}
 function leaderboard(c, sort) {
   const rows = Object.values(db.accounts).map(a => {
     const s = a.state || {};
@@ -699,7 +771,7 @@ function leaderboard(c, sort) {
       clan: a.clanId && db.clans[a.clanId] ? db.clans[a.clanId].name : null
     };
   });
-  const key = sort === 'event' ? 'seasonScore' : (sort === 'clicks' ? 'clicks' : (sort === 'wins' ? 'wins' : 'coins'));
+  const key = sort === 'event' ? 'seasonScore' : (sort === 'level' ? 'level' : (sort === 'clicks' ? 'clicks' : (sort === 'wins' ? 'wins' : 'coins')));
   rows.sort((a, b) => b[key] - a[key] || b.coins - a.coins);
   send(c, { t: 'lb:ok', rid: c.lastId, rows: rows.slice(0, 50), sort: key });
 }
@@ -1140,7 +1212,7 @@ setInterval(() => {
   /* матчмейкинг: соединяем ищущие команды */
   const seeking = [...teams.values()].filter(t => t.searching && t.state === 'wait' && !t.foeId);
   for (let i = 0; i + 1 < seeking.length; i += 2) startRaid(seeking[i], seeking[i + 1]);
-  if (now > db.seasonEnd) db.seasonEnd = now + SEASON_MS;
+  if (now > db.seasonEnd) paySeason();
 }, TICK).unref();
 
 setInterval(() => {

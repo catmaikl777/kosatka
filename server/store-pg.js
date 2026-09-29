@@ -121,7 +121,11 @@ function create(db, opts) {
       if (r.key === 'seq') db.seq = Number(r.value);
       if (r.key === 'seasonEnd') db.seasonEnd = Number(r.value);
     }
-    if (!db.seasonEnd || db.seasonEnd < Date.now()) db.seasonEnd = Date.now() + seasonMs;
+    /* Свежую дату не подставляем при просроченном seasonEnd намеренно:
+       пусть первый тик сервера выполнит выплату призов и начнёт новый
+       сезон (paySeason). Раньше тут же пересчитывали дату, и конец
+       сезона проходил молча, без наград. */
+    if (!db.seasonEnd) db.seasonEnd = Date.now() + seasonMs;
     if (!db.seq) {
       let maxId = 0;
       for (const id in db.accounts) maxId = Math.max(maxId, Number(id));

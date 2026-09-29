@@ -108,6 +108,24 @@
       if (msg.t === 'clan:state' || (Object.prototype.hasOwnProperty.call(msg, 'clan') && /^clan:/.test(msg.t || ''))) {
         applyClan(msg.clan || null);
       }
+      /* Приз сезона от сервера: кладём косатки локально, подтверждаем
+         получение (event:reward:ok), чтобы сервер не выдал приз второй раз. */
+      if (msg.t === 'event:reward') {
+        var rw = Number(msg.coins) || 0;
+        if (rw > 0 && root.ST) { root.ST.addCoins(rw, true); root.ST.save(); }
+        if (root.UI) root.UI.banner('ПРИЗ СЕЗОНА: +' + (root.ST && root.ST.fmt ? root.ST.fmt(rw) : rw), 'banner-good', 2000);
+        if (root.ST) { root.ST.state.eventSeasonScore = 0; root.ST.save(); }
+        send('event:reward:ok', {}, 6000).catch(function () {});
+        emit('reward', msg);
+      }
+      if (msg.t === 'event:season:end') {
+        if (root.ST) { root.ST.state.eventSeasonScore = 0; root.ST.save(); }
+        if (root.UI) {
+          root.UI.toast('Сезон ' + msg.season + ' окончен — призы розданы!', 'good', 'ticket');
+          root.UI.banner('НОВЫЙ СЕЗОН НАЧАЛСЯ', 'banner-info', 2000);
+        }
+        emit('seasonEnd', msg);
+      }
       emit(msg.t, msg);
       emit('*', msg);
     };

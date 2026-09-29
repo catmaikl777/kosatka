@@ -127,7 +127,8 @@
         html += '<div class="ev-top">' +
           '<div class="ev-cell"><span>До конца сезона</span><b>' + ST.fmtTime(info.left || 0) + '</b></div>' +
           '<div class="ev-cell"><span>Ваши билеты</span><b id="evTickets">' + (ST.state.eventTickets || 0) + '</b></div>' +
-          '<div class="ev-cell"><span>Очки сезона</span><b id="evScore">' + ST.fmt(info.topScore || 0) + '</b></div>' +
+          '<div class="ev-cell"><span>Ваши очки</span><b id="evScore">' + ST.fmt(info.myScore != null ? info.myScore : (ST.state.eventSeasonScore || 0)) + '</b></div>' +
+          '<div class="ev-cell"><span>Рекорд сезона</span><b>' + ST.fmt(info.topScore || 0) + '</b></div>' +
           '</div>';
       }
       html += '<p class="dialog-text">Билеты обмениваются в клане на очки сезона. Чем больше очков у клана, тем выше его место в наградах.</p>' +
@@ -146,7 +147,7 @@
       html += '<h4>Топ игроков сезона</h4><div class="ev-lb" id="evLb">загрузка…</div>';
       html += '<h4>Топ кланов сезона</h4><div class="ev-lb" id="evClanLb">загрузка…</div>';
       html += '<div class="ev-how">' + root.SHOP.SPRHTML('ticket', 2) +
-        ' Билеты: 1 за ' + (ST.up('ticket') > 0 ? ST.up('ticket') : D.EVENT.clickDiv) + ' кликов и 1 за ' + D.EVENT.pvpClickDiv + ' кликов в PvP.</div>';
+        ' Билеты: 1 за ' + (ST.up('ticket') > 0 ? ST.uval('ticket', 50) : D.EVENT.clickDiv) + ' кликов и 1 за ' + D.EVENT.pvpClickDiv + ' кликов в PvP.</div>';
       var m = UI.modalShell('СЕЗОННЫЙ ИВЕНТ', html);
       root.SHOP.paintIcons(m);
       var ex = m.querySelector('#evExchange');
@@ -174,7 +175,7 @@
           });
           API.clanList().then(function (rows) {
             var box = m.querySelector('#evClanLb');
-            if (box) box.innerHTML = rows.length ? clanTable(rows) : '<div class="dim">кланов пока нет</div>';
+            if (box) box.innerHTML = rows.length ? clanTable(rows, 'season') : '<div class="dim">кланов пока нет</div>';
           });
         }).catch(function (e) { UI.toast(e.message, 'bad', 'i_lock'); ex.disabled = false; });
       });
@@ -188,7 +189,7 @@
         API.clanList().then(function (rows) {
           var box = m.querySelector('#evClanLb');
           if (!box) return;
-          box.innerHTML = rows.length ? clanTable(rows) : '<div class="dim">кланов пока нет</div>';
+          box.innerHTML = rows.length ? clanTable(rows, 'season') : '<div class="dim">кланов пока нет</div>';
         });
       }
     });
@@ -201,11 +202,12 @@
     }
     return h + '</table>';
   }
-  function clanTable(rows) {
-    var h = '<table class="px-table"><tr><th>#</th><th>Клан</th><th>Участники</th><th>Сумма</th></tr>';
+  function clanTable(rows, mode) {
+    var isSeason = mode === 'season';
+    var h = '<table class="px-table"><tr><th>#</th><th>Клан</th><th>Участники</th><th>' + (isSeason ? 'Очки' : 'Сумма') + '</th></tr>';
     for (var i = 0; i < rows.length; i++) {
       h += '<tr class="' + (i < 3 ? 'top' + (i + 1) : '') + '"><td>' + (i + 1) + '</td><td>' + escapeHtml(rows[i].name) + '</td><td>' +
-        (rows[i].members || 0) + '</td><td>' + ST.fmt(rows[i].coins || 0) + '</td></tr>';
+        (rows[i].members || 0) + '</td><td>' + ST.fmt(isSeason ? (rows[i].score || 0) : (rows[i].coins || 0)) + '</td></tr>';
     }
     return h + '</table>';
   }

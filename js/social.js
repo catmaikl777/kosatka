@@ -100,12 +100,13 @@
       API.leaderboard(lbSort).then(function (rows) {
         if (!rows.length) { box.innerHTML = '<div class="dim">Пока пусто — сыграй первым!</div>'; return; }
         var meName = ST.state.account.name;
-        var h = '<table class="px-table"><tr><th>#</th><th>Игрок</th><th>Ур.</th><th>Косатки</th></tr>';
+        var ev = lbSort === 'event';
+        var h = '<table class="px-table"><tr><th>#</th><th>Игрок</th><th>Ур.</th><th>' + (ev ? 'Очки' : 'Косатки') + '</th></tr>';
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           h += '<tr class="' + (i < 3 ? 'top' + (i + 1) : '') + (r.name === meName ? ' me' : '') + '"><td>' + (i + 1) + '</td><td>' +
             esc(r.name) + (r.clan ? ' <i>[' + esc(r.clan) + ']</i>' : '') + '</td><td>' + r.level + '</td><td>' +
-            ST.fmt(r.coins) + '</td></tr>';
+            ST.fmt(ev ? (r.seasonScore || 0) : r.coins) + '</td></tr>';
         }
         box.innerHTML = h + '</table>';
       });

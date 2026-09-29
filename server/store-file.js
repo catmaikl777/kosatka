@@ -18,7 +18,7 @@ function create(db, opts) {
     try {
       const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
       Object.assign(db, raw);
-      if (!db.seasonEnd || db.seasonEnd < Date.now()) db.seasonEnd = Date.now() + seasonMs;
+      if (!db.seasonEnd) db.seasonEnd = Date.now() + seasonMs;
       return {
         accounts: Object.keys(db.accounts || {}).length,
         clans: Object.keys(db.clans || {}).length

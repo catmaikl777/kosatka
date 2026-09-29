@@ -202,6 +202,9 @@ async function main() {
   ok('лидерборд содержит A', lb.rows.some(r => r.name === 'Косатка' + uniq), JSON.stringify(lb.rows.slice(0, 2)));
   const lbEv = await A.send('lb', { sort: 'event' });
   ok('лидерборд по очкам сезона работает', Array.isArray(lbEv.rows));
+  const lbLvl = await A.send('lb', { sort: 'level' });
+  const lvlRow = lbLvl.rows.find(r => r.name === 'Косатка' + uniq);
+  ok('лидерборд по уровню работает (level=12 в строке)', !!lvlRow && lvlRow.level === 12, JSON.stringify(lvlRow));
 
   /* 6. кланы: A создаёт, B вступает по коду */
   const created = await A.send('clan:create', { name: 'Глубь' + uniq.slice(-4) });
