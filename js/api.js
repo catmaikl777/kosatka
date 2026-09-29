@@ -108,6 +108,11 @@
       if (msg.t === 'clan:state' || (Object.prototype.hasOwnProperty.call(msg, 'clan') && /^clan:/.test(msg.t || ''))) {
         applyClan(msg.clan || null);
       }
+      /* Очки сезона в HUD и окне ивента — только серверная истина:
+         event:info приходит при входе и при открытии окна ивента. */
+      if (msg.t === 'event:info' && root.ST && typeof msg.myScore === 'number') {
+        root.ST.state.eventSeasonScore = Math.max(0, Number(msg.myScore) || 0);
+      }
       /* Приз сезона от сервера: кладём косатки локально, подтверждаем
          получение (event:reward:ok), чтобы сервер не выдал приз второй раз. */
       if (msg.t === 'event:reward') {
