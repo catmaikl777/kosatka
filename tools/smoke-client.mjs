@@ -729,6 +729,35 @@ ST.load();
 ok('сейв восстанавливает монеты', ST.state.coins === coinsSaved, `${ST.state.coins} vs ${coinsSaved}`);
 ok('сейв восстанавливает уровень и скин', ST.state.level === lvlSaved && ST.state.skin === skinSaved);
 
+/* облачная загрузка после входа: fromCloud применяет облако, но хранит
+   личность аккаунта и настройки устройства */
+const deviceAcc = { name: 'Orca', token: 'tok-1', id: 7 };
+const deviceTheme = 'neon';
+ST.state.account = deviceAcc;
+ST.state.settings.theme = deviceTheme;
+const cloud = JSON.parse(save);
+cloud.coins = coinsSaved + 555;
+cloud.level = lvlSaved + 2;
+cloud.skin = 'gold';
+cloud.account = { name: null, token: null, id: null };
+cloud.settings.theme = 'lagoon';
+ok('fromCloud загружает облако', ST.fromCloud(cloud) === true);
+ok('из облака пришли монеты', ST.state.coins === coinsSaved + 555, String(ST.state.coins));
+ok('из облака пришли уровень и скин', ST.state.level === lvlSaved + 2 && ST.state.skin === 'gold');
+ok('личность аккаунта сохранена', ST.state.account.name === 'Orca' && ST.state.account.token === 'tok-1', JSON.stringify(ST.state.account));
+ok('настройки устройства сохранены', ST.state.settings.theme === 'neon', ST.state.settings.theme);
+ok('облако записано на диск', JSON.parse(localStorage.getItem(ST.KEY)).coins === coinsSaved + 555);
+ok('fromCloud на мусоре безопасен', ST.fromCloud(null) === false && ST.fromCloud('x') === false);
+
+/* сервер хранит отсутствие клана как null — импорт не должен ломать clan */
+const cloud2 = JSON.parse(localStorage.getItem(ST.KEY));
+cloud2.clan = null;
+ok('fromCloud с clan:null безопасен', ST.fromCloud(cloud2) === true);
+ok('после null-клана state.clan — объект', !!ST.state.clan && typeof ST.state.clan === 'object',
+  JSON.stringify(ST.state.clan));
+ST.state.clan.id = null; ST.state.clan.name = null; ST.state.clan.role = null;
+ok('в null-клан можно писать (applyClan не падает)', errors.length === 0, errors.slice(0, 2).join(' | '));
+
 /* ================= 10. оффлайн-доход ================= */
 const snap2 = JSON.parse(save);
 snap2.lastSave = Date.now() - 3600000;      /* час назад */

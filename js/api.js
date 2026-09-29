@@ -48,6 +48,12 @@
       (cl && clanState && cl.id === clanState.id && cl.name === clanState.name && cl.role === clanState.role);
     clanState = cl || null;
     if (root.ST) {
+      /* серверная проекция может прийти вместе с сейвом, где клана нет:
+         saveState() хранит состояние клана как null — держим объект с
+         пустыми полями, чтобы не падать в state.clan.id */
+      var c0 = root.ST.state.clan;
+      if (!c0 || typeof c0 !== 'object') c0 = { id: null, name: null, role: null, joined: 0 };
+      root.ST.state.clan = c0;
       root.ST.state.clan.id = clanState ? clanState.id : null;
       root.ST.state.clan.name = clanState ? clanState.name : null;
       root.ST.state.clan.role = clanState ? clanState.role : null;

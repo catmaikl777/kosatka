@@ -188,19 +188,33 @@
       set(el, a ? '@' + a.name : 'Гость · прогресс только на этом устройстве');
       paintHUD();
       if (a) {
-        /* подтягиваем облачное сохранение */
+        /* подтягиваем облачное сохранение и решаем, чьё брать */
         api.pullSave().then(function (cloud) {
+          var localCoins = ST.state.totalCoins;
           if (!cloud) { api.pushSave(ST.state); return; }
-          var localCoins = ST.state.totalCoins, cloudCoins = (cloud.stats && cloud.coins) || cloud.coins || 0;
+          var cloudCoins = (cloud.stats && cloud.coins) || cloud.coins || 0;
           if (cloudCoins > localCoins * 1.2) {
             UI.confirm('Загрузить облачный прогресс?',
               'В облаке: ' + ST.fmt(cloudCoins) + ' всего, на устройстве: ' + ST.fmt(localCoins) + '. Загрузить облако?',
               'Загрузить').then(function (y) {
-                if (!y) return;
+                if (!y) { api.pushSave(ST.state); return; }
+                /* применяем облачный сейв и пересобираем экран с нового
+                   состояния. Раньше здесь был location.reload() и
+                   window.__cloudState, который reload стирал — облако
+                   фактически никогда не загружалось. */
+                ST.fromCloud(cloud);
                 location.reload();
               });
-            window.__cloudState = cloud;
+          } else if (localCoins > cloudCoins * 1.2) {
+            UI.confirm('Устройство богаче облака',
+              'На устройстве: ' + ST.fmt(localCoins) + ' всего, в облаке: ' + ST.fmt(cloudCoins) + '. Оставить устройство и перезаписать облако?',
+              'Оставить устройство').then(function (y) {
+                if (y) { api.pushSave(ST.state); return; }
+                ST.fromCloud(cloud);
+                location.reload();
+              });
           } else {
+            /* прогресс сопоставим — держим устройство и синхронизируемся */
             api.pushSave(ST.state);
           }
         });

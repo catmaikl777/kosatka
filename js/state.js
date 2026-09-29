@@ -83,6 +83,25 @@
     emit('reset');
     save(true);
   }
+  /* Импорт облачного сохранения (после входа в аккаунт): берём облако
+     поверх чистого сейва, но сохраняем личность (account из auth:ok) и
+     настройки устройства. Клан приводим к объекту с пустыми полями —
+     сервер хранит отсутствие клана как null (saveState). Раньше
+     «загрузка облака» сводилась к location.reload() + window.__cloudState,
+     который reload стирал — сейв фактически не применялся. */
+  function fromCloud(cloud) {
+    if (!cloud || typeof cloud !== 'object') return false;
+    var acc = state.account;
+    var settings = state.settings;
+    var merged = merge(D.freshState(), cloud);
+    merged.account = acc;
+    merged.settings = settings;
+    merged.clan = Object.assign({ id: null, name: null, role: null, joined: 0 }, merged.clan || {});
+    merged.lastSave = Date.now();
+    state = merged;
+    save(true);
+    return true;
+  }
 
   /* ---------- формулы ---------- */
   function up(id) { return state.upgrades[id] || 0; }
@@ -498,7 +517,7 @@
   root.ST = {
     KEY: KEY,
     get state() { return state; },
-    load: load, save: save, flush: flush, reset: reset,
+    load: load, save: save, flush: flush, reset: reset, fromCloud: fromCloud,
     fmt: fmt, fmtTime: fmtTime, fmtFullTime: fmtFullTime,
     up: up, uval: uval, totalUpgrades: totalUpgrades,
     perClick: perClick, perSecond: perSecond, autoCps: autoCps, critChance: critChance, critMult: critMult,

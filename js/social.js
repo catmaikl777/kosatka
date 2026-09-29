@@ -72,7 +72,6 @@
           UI.closeEl(m);
           root.SND.play('levelUp');
           UI.banner('ДОБРО ПОЖАЛОВАТЬ!', 'banner-good', 1400);
-          API.pushSave(ST.state).then(function () {});
         }).catch(function (e2) {
           err.textContent = e2.message || 'Ошибка входа';
           go.disabled = false;

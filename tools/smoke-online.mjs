@@ -432,7 +432,7 @@ ok('клиент C: сервер вернул того же игрока',
   !!(C.sb.API.account && A.sb.API.account && C.sb.API.account.id === A.sb.API.account.id),
   `${C.sb.API.account?.id} vs ${A.sb.API.account?.id}`);
 ok('при равном прогрессе клиент не спрашивает про облако (лишних вопросов нет)',
-  C.sb.window.__cloudState === undefined, String(C.sb.window.__cloudState !== undefined));
+  C.doc.querySelector('[data-act="yes"]') === null, 'появилось окно подтверждения');
 
 /* новый девайс: вход по паролю → предлагает забрать облачный прогресс */
 const E = makeClient('E');
@@ -449,14 +449,15 @@ while (Date.now() - t0 < 6000 && !confirmBtn) {
   if (!confirmBtn) await sleep(100);
 }
 ok('клиент E: предложено загрузить облачный прогресс', !!confirmBtn);
-const cloudState = E.sb.window.__cloudState;
-ok('облачный сейв получен (1.23M > локальных 0)',
-  !!cloudState && (cloudState.coins === coinsPush || cloudState.totalCoins === coinsPush),
-  cloudState ? `coins=${cloudState.coins}, total=${cloudState.totalCoins}` : 'нет');
 console.log('    · жмём «Загрузить»…');
-if (confirmBtn) { confirmBtn.click(); await sleep(300); }
+if (confirmBtn) { confirmBtn.click(); await sleep(400); }
+ok('клиент E: облачный сейв применён (1.23M > локальных 0)',
+  E.sb.ST.state.coins === coinsPush || E.sb.ST.state.totalCoins === coinsPush,
+  `coins=${E.sb.ST.state.coins}, total=${E.sb.ST.state.totalCoins}`);
+ok('клиент E: личность входа сохранена после загрузки облака',
+  E.sb.ST.state.account.name === 'Косатка', JSON.stringify(E.sb.ST.state.account));
 console.log('    · нажали, reload=' + E.sb.location.reloaded);
-ok('после «Загрузить» клиент перезагружает страницу', E.sb.location.reloaded === true, String(E.sb.location.reloaded));
+ok('после «Загрузить» клиент перезагружает страницу с новым сейвом', E.sb.location.reloaded === true, String(E.sb.location.reloaded));
 ok('вход по паролю создал тот же аккаунт',
   !!(E.sb.API.account && A.sb.API.account && E.sb.API.account.id === A.sb.API.account.id),
   `${E.sb.API.account?.id} vs ${A.sb.API.account?.id}`);
