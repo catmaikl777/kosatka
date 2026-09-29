@@ -33,18 +33,21 @@ const DATA = (() => {
 const SKIN_IDS = DATA ? new Set(DATA.SKINS.map(s => s.id)) : null;
 const EFFECT_IDS = DATA ? new Set(DATA.EFFECTS.map(e => e.id)) : null;
 const UPG_IDS = DATA ? new Set(DATA.UPGRADES.map(u => u.id)) : null;
-/* Путь к базе выбирает server/paths.js: переменные DATA_FILE/DATA_DIR имеют
-   приоритет, иначе подбирается постоянный каталог ЗА пределами папки с
-   кодом (иначе деплой затирал бы аккаунты и кланы). */
+/* Хранилище выбирает server/store.js: если задан DATABASE_URL — PostgreSQL,
+   иначе JSON-файл, путь к которому подбирает server/paths.js (переменные
+   DATA_FILE/DATA_DIR имеют приоритет, иначе выбирается постоянный каталог
+   ЗА пределами папки с кодом — иначе деплой затирал бы аккаунты и кланы). */
 const PATHS = require('./paths.js');
 const BACKUP = require('./backup.js');
-const DB_PATH = PATHS.resolve();
+const STORE_MOD = require('./store.js');
+const USE_PG = !!process.env.DATABASE_URL;
+const DB_PATH = USE_PG ? { file: null, source: 'postgres', persistent: true } : PATHS.resolve();
 const DB_FILE = DB_PATH.file;
-const DB_DIR = path.dirname(DB_FILE);
+const DB_DIR = DB_FILE ? path.dirname(DB_FILE) : null;
 const DB_PERSISTENT = DB_PATH.persistent;
-const DB_MOVED_FROM = PATHS.migrateIfNeeded(DB_PATH);
-const DB_BORN = PATHS.mark(DB_FILE);
-const DB_SAME_FS = PATHS.sameFs(DB_DIR, __dirname);/* публичный адрес сервиса: платформы передают его по-разному.
+const DB_MOVED_FROM = USE_PG ? null : PATHS.migrateIfNeeded(DB_PATH);
+const DB_BORN = USE_PG ? null : PATHS.mark(DB_FILE);
+const DB_SAME_FS = USE_PG ? null : PATHS.sameFs(DB_DIR, __dirname);/* публичный адрес сервиса: платформы передают его по-разному.
    Внимание: без скобок '||' перебивает '?:' по приоритету, и при заданном
    PUBLIC_URL/RENDER_EXTERNAL_URL (без FLY_APP_NAME) печатался бы
    https://undefined.fly.dev. */
@@ -67,43 +70,61 @@ const db = {
   seasonEnd: Date.now() + SEASON_MS
 };
 
-function loadDb() {
+/* Создаём хранилище: PG или файл. Игровой код работает с объектом db
+   в памяти, а слой хранения сам решает, куда его писать. */
+const STORE = STORE_MOD.create(db, { file: DB_FILE });
+
+async function loadDb() {
   try {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-    const raw = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    Object.assign(db, raw);
-    if (!db.seasonEnd || db.seasonEnd < Date.now()) db.seasonEnd = Date.now() + SEASON_MS;
-    console.log(`[db] загружено: ${Object.keys(db.accounts).length} аккаунтов, ${Object.keys(db.clans).length} кланов`);
+    const r = await STORE.load(SEASON_MS);
+    if (r.fresh) {
+      console.log('[db] новая база' + (r.error ? ' (' + r.error + ')' : ''));
+      /* сразу фиксируем базу, чтобы следующие рестарты не гадали: для файла
+         это создаёт db.json, для PG — первые строки */
+      await flushDb();
+    } else {
+      console.log(`[db] загружено: ${Object.keys(db.accounts).length} аккаунтов, ${Object.keys(db.clans).length} кланов`);
+    }
   } catch (e) {
-    console.log('[db] новая база', e.code === 'ENOENT' ? '' : '(' + e.message + ')');
-    saveDb(true);
+    console.error('[db] не удалось открыть базу:', e.message);
+    console.error('[db] сервер стартует с ПУСТОЙ базой — игроки увидят новый мир.');
   }
 }
 let saveTimer = null;
 let dbBrokenWarned = false;
+let saveInFlight = null;
+let savePending = false;
 function saveDb(now) {
-  if (now) return writeDb();
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => { saveTimer = null; writeDb(); }, 2000);
+  if (now) return flushDb();
+  if (saveTimer) return null;
+  saveTimer = setTimeout(() => { saveTimer = null; flushDb(); }, 2000);
+  return null;
 }
-function writeDb() {
-  try {
-    /* каталог берём от DATA_FILE: на PaaS база часто лежит на смонтированном
-       диске (/data/db.json), и DATA_DIR тут ни при чём */
-    fs.mkdirSync(DB_DIR, { recursive: true });
-    const tmp = DB_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db));
-    fs.renameSync(tmp, DB_FILE);       /* атомарно: рестарт не оставит битую базу */
-    dbBrokenWarned = false;
-  } catch (e) {
-    console.error('[db] ошибка записи:', e.message);
-    if (!dbBrokenWarned) {
-      dbBrokenWarned = true;
-      console.error('[db] ВНИМАНИЕ: база не сохраняется — прогресс игроков будет потерян.');
-      console.error('[db] Проверь, что каталог ' + DB_DIR + ' существует и доступен на запись (volume/disk).');
-    }
-  }
+/* Запись в БД асинхронная (и для файла, и тем более для PG). Пока идёт
+   одна запись, следующие запросы не плодят новые соединения, а пометка
+   savePending заставит повторить снимок — иначе изменения, сделанные
+   во время записи, молча потерялись бы. */
+function flushDb() {
+  if (saveInFlight) { savePending = true; return saveInFlight; }
+  saveInFlight = Promise.resolve()
+    .then(function () { return STORE.save(); })
+    .then(function () { dbBrokenWarned = false; }, function (e) {
+      console.error('[db] ошибка записи:', e.message);
+      if (!dbBrokenWarned) {
+        dbBrokenWarned = true;
+        console.error('[db] ВНИМАНИЕ: база не сохраняется — прогресс игроков может быть потерян.');
+        if (STORE.backend === 'pg') console.error('[db] Проверь DATABASE_URL и доступность PostgreSQL.');
+        else console.error('[db] Проверь, что каталог ' + DB_DIR + ' доступен на запись.');
+      }
+    })
+    .then(function () {
+      saveInFlight = null;
+      if (savePending) { savePending = false; return flushDb(); }
+    });
+  return saveInFlight;
 }
+/* Старое имя осталось для shutdown/uncaughtException. */
+function writeDb() { return flushDb(); }
 
 /* ================= Утилиты ================= */
 const rnd = (n) => crypto.randomBytes(n).toString('hex');
@@ -280,13 +301,18 @@ const server = http.createServer((req, res) => {
       /* Диагностика переживаемости базы. dbFirst — метка первого запуска
          на этом диске, она не перезаписывается: если после редеплоя её нет
          или дата откатилась — каталог затирается вместе с образом.
-         dbSameFs: true — база лежит в слое образа (том не подключён). */
+         dbSameFs: true — база лежит в слое образа (том не подключён).
+         Для PostgreSQL вместо пути на диске важен сам бэкенд: он живёт
+         рядом с сервисом и переживает передеплой. */
       dbSource: DB_PATH.source,
+      dbBackend: STORE.backend,
+      dbHost: STORE.info().host || null,
       dbFirst: (DB_BORN && DB_BORN.first) || null,
       dbSameFs: DB_SAME_FS,
       /* доступные для записи каталоги на ОТДЕЛЬНОЙ ФС — если платформа
-         подключила том, но DATA_FILE смотрит в образ, вент здесь */
-      dbVolumes: PATHS.volumes(),
+         подключила том, но DATA_FILE смотрит в образ, вент здесь.
+         Для PostgreSQL тома не нужны, поэтому и не создаём каталоги. */
+      dbVolumes: USE_PG ? [] : PATHS.volumes(),
       /* состояние бэкапа: on=false — бэкап не настроен, тогда аккаунты
          переживут рестарт только при наличии тома */
       backup: {
@@ -1141,17 +1167,18 @@ function fixRaidOwner(t) {
   }
 }
 
-/* Запоминаем ДО loadDb(): loadDb создаёт файл, если его не было,
-   и «файл есть» после неё означало бы всегда «база не потеряна». */
-const DB_EXISTED = fs.existsSync(DB_FILE);
-loadDb();
 
 /* ---- бэкап в приватный репозиторий GitHub ----
-   Если файла базы не было (деплой без тома) — воскрешаем её из снимка,
-   иначе игроки зашли бы в пустой мир. Дальше снимок уходит сам. */
+   Если база пуста (деплой без тома, wipe, свежая PostgreSQL) — воскрешаем
+   её из снимка, иначе игроки зашли бы в пустой мир. Дальше снимок уходит сам. */
 const backup = BACKUP.create({
   getJson: function () { return JSON.stringify(db); },
-  applyJson: function (raw) { Object.assign(db, JSON.parse(raw)); }
+  applyJson: function (raw) {
+    Object.assign(db, JSON.parse(raw));
+    /* восстановленные записи сервер не помнит как записанные — сбрасываем
+       кэш диффа, иначе они не попадут в базу до первого изменения */
+    STORE.invalidate();
+  }
 });
 if (backup.config && backup.config.on) {
   console.log('  бэкап базы: ' + backup.config.repo + ' → ' + backup.config.path +
@@ -1170,16 +1197,24 @@ function boot() {
     console.log('      http://localhost:' + PORT);
     console.log('      ws://localhost:' + PORT + '/ws');
     if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
-    console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
-    console.log('      путь выбран: ' + DB_PATH.source +
-      (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
+    if (USE_PG) {
+      /* PostgreSQL переживает передеплой сам: это внешний сервис, а не файл
+         в слое образа, поэтому предупреждений про эфемерный диск тут нет. */
+      console.log('      база: PostgreSQL ' + (STORE.info().host || '') + '  ← переживает редеплой');
+    } else {
+      console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
+    }
+    if (!USE_PG) {
+      console.log('      путь выбран: ' + DB_PATH.source +
+        (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
+    }
     if (DB_BORN && DB_BORN.first) {
       console.log('      этот диск живёт с: ' + DB_BORN.first);
     }
     if (DB_MOVED_FROM) {
       console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
     }
-    if (!DB_PERSISTENT) {
+    if (!USE_PG && !DB_PERSISTENT) {
       console.log('');
       console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
       console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');
@@ -1198,19 +1233,30 @@ function boot() {
   });
 }
 
-if (backup.config && backup.config.on && !DB_EXISTED) {
-  backup.restore().then(function (restored) {
-    if (restored) {
-      console.log('  ✔ база восстановлена из бэкапа: аккаунтов ' +
-        Object.keys(db.accounts).length + ', кланов ' + Object.keys(db.clans).length);
-    }
-    backup.start();
-    boot();
-  });
-} else {
+/* Пустота базы (а не отсутствие файла) решает, воскрешать ли бэкап:
+   для PostgreSQL файла нет вовсе, а «база была непустой» — единственный
+   честный признак того, что мир не надо поднимать заново. */
+function dbIsEmpty() {
+  return !Object.keys(db.accounts).length && !Object.keys(db.clans).length;
+}
+
+loadDb().then(function () {
+  if (backup.config && backup.config.on && dbIsEmpty()) {
+    return backup.restore().then(function (restored) {
+      if (restored) {
+        console.log('  ✔ база восстановлена из бэкапа: аккаунтов ' +
+          Object.keys(db.accounts).length + ', кланов ' + Object.keys(db.clans).length);
+        return flushDb();   /* снимок из GitHub сразу ложится в базу */
+      }
+    });
+  }
+  return null;
+}).catch(function (e) {
+  console.error('[boot] ошибка на старте:', e && e.message);
+}).then(function () {
   if (backup.config && backup.config.on) backup.start();
   boot();
-}
+});
 
 /* ================= Мягкое завершение (PaaS деплоит через SIGTERM) =================
    Пока идёт деплой, новые соединения не принимаем, существующие рвём, базу пишем. */
@@ -1222,28 +1268,32 @@ function shutdown(signal) {
   try { server.close(); } catch (e) { /* ignore */ }
   for (const c of [...clients]) { try { c.socket.destroy(); } catch (e) { /* ignore */ } }
   clients.clear();
-  try { writeDb(); } catch (e) { console.error('[db] не сохранилась:', e.message); }
+  /* Запись в базу асинхронная (для PostgreSQL тем более), поэтому дальше
+     мы обязаны ДОЖДАТЬСЯ её: иначе SIGTERM убьёт процесс на середине
+     запроса и последние секунды прогресса пропадут. Сторож — на случай,
+     если БД не отвечает: платформа даёт на завершение считанные секунды. */
+  const bye = function () { console.log('[boot] готово, до свидания.'); process.exit(0); };
+  const guard = setTimeout(bye, 9000);
+  if (guard.unref) guard.unref();
+  const saved = writeDb()
+    .then(function () { return STORE.close(); })
+    .catch(function (e) { console.error('[db] не сохранилась:', e.message); });
   /* снимок в GitHub — страховка от wipe; ждём недолго, но успеваем */
   if (backup.config && backup.config.on) {
     backup.stop();
-    /* страховка: если сеть/GitHub завис, всё равно выходим — платформа
-       даёт на завершение считанные секунды и потом убивает процесс */
-    const bye = function () { console.log('[boot] готово, до свидания.'); process.exit(0); };
-    const guard = setTimeout(bye, 9000);
-    if (guard.unref) guard.unref();
-    backup.flush(true)
+    saved
+      .then(function () { return backup.flush(true); })
       .then((ok) => { if (ok) console.log('[backup] снимок сохранён в ' + backup.config.repo); })
       .catch(() => { /* ошибка уже в backup.state */ })
       .then(bye);
     return;
   }
-  console.log('[boot] готово, до свидания.');
-  process.exit(0);
+  saved.then(bye);
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (e) => {
   console.error('[fatal] необработанная ошибка:', e && e.stack ? e.stack : e);
-  try { writeDb(); } catch (x) { /* ignore */ }
-  process.exit(1);
+  Promise.resolve(writeDb()).catch(() => { /* ignore */ });
+  setTimeout(function () { process.exit(1); }, 1500);
 });

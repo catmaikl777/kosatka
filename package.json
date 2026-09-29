@@ -9,11 +9,12 @@
     "build": "node tools/prepare-pages.mjs",
     "preview": "node tools/serve-pages.mjs",
     "icons": "node tools/make-icons.mjs",
-    "test": "npm run test:check && npm run test:sprites && npm run test:client && npm run test:server && npm run test:backup && npm run test:balance && npm run test:online",
+    "test": "npm run test:check && npm run test:sprites && npm run test:client && npm run test:server && npm run test:pg && npm run test:backup && npm run test:balance && npm run test:online",
     "test:check": "node tools/checkclient.mjs",
     "test:sprites": "node tools/checksprites.mjs",
     "test:client": "node tools/smoke-client.mjs",
     "test:server": "node tools/smoke-server.mjs",
+    "test:pg": "node tools/smoke-pg.cjs",
     "test:backup": "node tools/smoke-backup.mjs",
     "test:balance": "node tools/smoke-balance.mjs",
     "test:online": "node tools/smoke-online.mjs",
@@ -22,7 +23,16 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["clicker", "pixel-art", "multiplayer", "websocket", "game"],
+  "keywords": [
+    "clicker",
+    "pixel-art",
+    "multiplayer",
+    "websocket",
+    "game"
+  ],
   "license": "MIT",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
 }
