@@ -5,7 +5,11 @@ const fs = require('fs');
 const path = require('path');
 
 function create(db, opts) {
-  const file = opts.file;
+  /* Путь просим у вызывающего лениво: в режиме PostgreSQL файл вообще не
+     нужен, и выбирать его (а заодно создавать каталоги) на старте впустую
+     нельзя — вдруг потом сработает откат на файл. */
+  const pathInfo = (opts && opts.resolveFile) ? opts.resolveFile() : { file: opts.file };
+  const file = pathInfo.file;
   const dir = path.dirname(file);
   let brokenWarned = false;
 

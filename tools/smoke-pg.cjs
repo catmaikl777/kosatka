@@ -58,8 +58,15 @@ function makeFake(seed) {
 function FakePool() { lastFake = makeFake(global.__pgseed || {}); return lastFake.pool; }
 
 const pgMock = { Pool: FakePool, types: { setTypeParser() {} } };
-const pgPath = require.resolve('pg');
-require.cache[pgPath] = { id: pgPath, filename: pgPath, loaded: true, exports: pgMock };
+/* Подменяем require('pg') целиком, а не правим require.cache: тест должен
+   проходить и без установленного драйвера (проверяем логику хранилища,
+   а не наличие пакета). */
+const Module = require('module');
+const realLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === 'pg') return pgMock;
+  return realLoad.apply(this, arguments);
+};
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@db.example/kosatka';
 
 const STORE_PG = require(path.join(__dirname, '..', 'server', 'store-pg.js'));

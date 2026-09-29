@@ -84,6 +84,13 @@ node server/server.js
 DATABASE_URL=postgresql://user:pass@host:5432/kosatka?sslmode=require
 ```
 
+> **Важно для деплоя:** сервис теперь зависит от пакета `pg`, поэтому образ
+> обязан собираться с `npm install` (или `npm ci`). Если платформа запускает
+> контейнер без установки зависимостей, сервер не упадёт — он поднимется на
+> файловой базе и напишет об этом в лог и в `/api/health` (`dbBackend: "file"`,
+> `dbError: «пакет pg не установлен…»`). В PostgreSQL при этом ничего не
+> запишется, поэтому `dbError` стоит мониторить.
+
 Схему создавать вручную не нужно: сервис на первом старте сам выполнит
 `CREATE TABLE IF NOT EXISTS`. Таблицы — `accounts`, `clans`, `meta`
 (префикс отсутствует, чтобы не спорить с чужими данными в общей базе).
@@ -144,6 +151,7 @@ DATABASE_URL='postgresql://user:pass@host:5432/kosatka?sslmode=require' \
 | Поле | Значение |
 |---|---|
 | `dbBackend` | `pg` — база в PostgreSQL, `file` — в JSON-файле |
+| `dbError` | непустое = сервер просил PostgreSQL, не смог и откатился на файл |
 | `dbHost` | хост PostgreSQL (только при `dbBackend: "pg"`) |
 | `dbSource` | откуда выбран путь: `postgres`, `DATA_FILE`, `DATA_DIR`, `/data`, `home`, `legacy` |
 | `dbSameFs` | `true` — база в том же образе, что и код (том не подключён); `false` — отдельный том |
@@ -367,6 +375,8 @@ npm run test:dist                 # те же живые тесты, но на �
   решение — задать `DATABASE_URL` и уйти на PostgreSQL.
 - **`[db] не удалось открыть базу`.** Проверь строку подключения и что из
   контейнера до неё долетает сеть; подробности — `node tools/pg-check.mjs`.
+- **CrashLoop: `Cannot find module 'pg'`.** Образ собран без `npm install`.
+  Проверь build-команду платформы (должна ставить зависимости).
 - **404 на `/ws`.** Прокси не пробрасывает `Upgrade` — на Render/Fly/Railway это
   работает из коробки, за nginx нужен `proxy_set_header Upgrade $http_upgrade;`.
 - **Две реплики бэкенда.** Лобби, рейды и аккаунты живут в памяти процесса,

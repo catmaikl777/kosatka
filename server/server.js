@@ -41,13 +41,25 @@ const PATHS = require('./paths.js');
 const BACKUP = require('./backup.js');
 const STORE_MOD = require('./store.js');
 const USE_PG = !!process.env.DATABASE_URL;
-const DB_PATH = USE_PG ? { file: null, source: 'postgres', persistent: true } : PATHS.resolve();
-const DB_FILE = DB_PATH.file;
-const DB_DIR = DB_FILE ? path.dirname(DB_FILE) : null;
-const DB_PERSISTENT = DB_PATH.persistent;
-const DB_MOVED_FROM = USE_PG ? null : PATHS.migrateIfNeeded(DB_PATH);
-const DB_BORN = USE_PG ? null : PATHS.mark(DB_FILE);
-const DB_SAME_FS = USE_PG ? null : PATHS.sameFs(DB_DIR, __dirname);/* публичный адрес сервиса: платформы передают его по-разному.
+
+/* Путь к файловой базе выбирается ЛЕНИВО. Пока работает PostgreSQL, путь
+   не нужен, а выбирать его на старте впустую нельзя: PATHS.resolve() создаёт
+   каталоги на диске, и при откате на файл путь обязан быть ещё раз
+   разрешён заново. Поэтому всё про файл живёт в ensureFile(). */
+let DB_PATH = null, DB_FILE = null, DB_DIR = null, DB_PERSISTENT = true;
+let DB_MOVED_FROM = null, DB_BORN = null, DB_SAME_FS = null;
+function ensureFile() {
+  if (!DB_PATH) {
+    DB_PATH = PATHS.resolve();
+    DB_FILE = DB_PATH.file;
+    DB_DIR = path.dirname(DB_FILE);
+    DB_PERSISTENT = DB_PATH.persistent;
+    DB_MOVED_FROM = PATHS.migrateIfNeeded(DB_PATH);
+    DB_BORN = PATHS.mark(DB_FILE);
+    DB_SAME_FS = PATHS.sameFs(DB_DIR, __dirname);
+  }
+  return DB_PATH;
+}/* публичный адрес сервиса: платформы передают его по-разному.
    Внимание: без скобок '||' перебивает '?:' по приоритету, и при заданном
    PUBLIC_URL/RENDER_EXTERNAL_URL (без FLY_APP_NAME) печатался бы
    https://undefined.fly.dev. */
@@ -71,8 +83,9 @@ const db = {
 };
 
 /* Создаём хранилище: PG или файл. Игровой код работает с объектом db
-   в памяти, а слой хранения сам решает, куда его писать. */
-const STORE = STORE_MOD.create(db, { file: DB_FILE });
+   в памяти, а слой хранения сам решает, куда его писать. Файловый путь
+   отдаём лениво — он нужен, только если реально выпал файловый режим. */
+const STORE = STORE_MOD.create(db, { resolveFile: ensureFile });
 
 async function loadDb() {
   try {
@@ -304,15 +317,18 @@ const server = http.createServer((req, res) => {
          dbSameFs: true — база лежит в слое образа (том не подключён).
          Для PostgreSQL вместо пути на диске важен сам бэкенд: он живёт
          рядом с сервисом и переживает передеплой. */
-      dbSource: DB_PATH.source,
+      dbSource: STORE.backend === 'pg' ? 'postgres' : (DB_PATH ? DB_PATH.source : null),
       dbBackend: STORE.backend,
       dbHost: STORE.info().host || null,
+      /* непустое поле = сервер просил PostgreSQL, но не смог и тихо
+         перешёл на файл. Мониторинг должен это видеть. */
+      dbError: STORE_MOD.error() || null,
       dbFirst: (DB_BORN && DB_BORN.first) || null,
       dbSameFs: DB_SAME_FS,
       /* доступные для записи каталоги на ОТДЕЛЬНОЙ ФС — если платформа
          подключила том, но DATA_FILE смотрит в образ, вент здесь.
          Для PostgreSQL тома не нужны, поэтому и не создаём каталоги. */
-      dbVolumes: USE_PG ? [] : PATHS.volumes(),
+      dbVolumes: STORE.backend === 'file' ? PATHS.volumes() : [],
       /* состояние бэкапа: on=false — бэкап не настроен, тогда аккаунты
          переживут рестарт только при наличии тома */
       backup: {
@@ -1197,14 +1213,14 @@ function boot() {
     console.log('      http://localhost:' + PORT);
     console.log('      ws://localhost:' + PORT + '/ws');
     if (ext) console.log('      публично: ' + ext.replace(/\/+$/, ''));
-    if (USE_PG) {
+    if (STORE.backend === 'pg') {
       /* PostgreSQL переживает передеплой сам: это внешний сервис, а не файл
          в слое образа, поэтому предупреждений про эфемерный диск тут нет. */
       console.log('      база: PostgreSQL ' + (STORE.info().host || '') + '  ← переживает редеплой');
     } else {
       console.log('      база: ' + DB_FILE + (DB_PERSISTENT ? '' : '  ← ЭФЕМЕРНО'));
     }
-    if (!USE_PG) {
+    if (STORE.backend === 'file') {
       console.log('      путь выбран: ' + DB_PATH.source +
         (DB_SAME_FS === false ? ' (отдельный том)' : DB_SAME_FS === true ? ' (внутри образа)' : ''));
     }
@@ -1214,7 +1230,7 @@ function boot() {
     if (DB_MOVED_FROM) {
       console.log('      база перенесена со старого места: ' + DB_MOVED_FROM);
     }
-    if (!USE_PG && !DB_PERSISTENT) {
+    if (!DB_PERSISTENT) {
       console.log('');
       console.log('  ⚠  База лежит во временном каталоге и пропадёт при следующем деплое.');
       console.log('     Задай DATA_FILE или DATA_DIR на постоянном диске.');

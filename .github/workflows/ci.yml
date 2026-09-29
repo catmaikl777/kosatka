@@ -16,10 +16,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+
+      - name: Зависимости
+        run: npm ci
 
       - name: Синтаксис всех скриптов
         run: |
-          for f in js/*.js server/*.js tools/*.mjs sw.js; do
+          for f in js/*.js server/*.js tools/*.mjs tools/*.cjs sw.js; do
             node --check "$f" || exit 1
           done
           echo "синтаксис ок"

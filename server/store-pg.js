@@ -7,12 +7,27 @@
    и переписывать все записи каждые 2 с было бы расточительно. Поэтому мы
    держим в памяти JSON-строку последней записанной версии каждой записи
    и в pg попадают только реально изменившиеся. */
-const { Pool } = require('pg');
-
-/* node-pg отдаёт int8/bigint строкой, а id в игре — число. Без этого
-   сравнения вида acc.id === 42 ломались бы на загрузке. */
-try { require('pg').types.setTypeParser(20, function (v) { return v === null ? null : Number(v); }); }
-catch (e) { /* ignore */ }
+/* Драйвер грузим лениво. Раньше `require('pg')` стоял на верхнем уровне, и
+   контейнер, собранный без `npm install`, падал в CrashLoop на старте —
+   сервис становился недоступен целиком, включая попытку починить. Теперь
+   отсутствие драйвера не убивает сервис: store.js ловит ошибку и
+   переключается на файл, объясняя причину. */
+let Pool = null;
+function loadPg() {
+  if (Pool) return Pool;
+  let mod;
+  try { mod = require('pg'); }
+  catch (e) {
+    throw new Error('пакет pg не установлен в образе — собери сервис с ' +
+      '`npm install` (или `npm ci`), иначе в PostgreSQL ничего не запишется');
+  }
+  /* node-pg отдаёт int8/bigint строкой, а id в игре — число. Без этого
+     сравнения вида acc.id === 42 ломались бы на загрузке. */
+  try { mod.types.setTypeParser(20, function (v) { return v === null ? null : Number(v); }); }
+  catch (e) { /* ignore */ }
+  Pool = mod.Pool;
+  return Pool;
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS accounts (
@@ -49,7 +64,8 @@ function snapshot(map) {
 
 function create(db, opts) {
   const conn = process.env.DATABASE_URL;
-  const pool = new Pool({
+  const PgPool = loadPg();
+  const pool = new PgPool({
     connectionString: conn,
     ssl: /sslmode=require|heroku|neon|supabase|render/.test(conn) ? { rejectUnauthorized: false } : undefined,
     max: 4
