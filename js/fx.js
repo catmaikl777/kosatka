@@ -190,6 +190,12 @@
     cv.width = w; cv.height = h;
     cv.style.width = '100%';
     cv.style.height = '100%';
+    /* высоту меню отдаём в CSS: подсказка и поле ориентируются на неё */
+    var menu = document.querySelector('.menu');
+    if (menu && document.documentElement) {
+      var mh = Math.round(menu.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--menu-h', mh + 'px');
+    }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     buildStatic();
@@ -624,13 +630,30 @@
     var s = SPR.size(k, stateSkinPal(), true);
     return { w: s.w, h: s.h, canvas: c };
   }
+  /* Границы видимого поля: между HUD и меню. Раньше орангутина
+     считалась от высоты всего экрана, поэтому на телефоне (где меню
+     и HUD съедают почти половину) она получалась больше самой видимой
+     части поля и «уезжала» под меню. */
+  function fieldInsets() {
+    var rect = cv.getBoundingClientRect();
+    var k = cv.height / (rect.height || cv.height || 1);   /* css px -> пиксели буфера */
+    var hud = document.querySelector('.hud');
+    var menu = document.querySelector('.menu');
+    var top = hud ? hud.getBoundingClientRect().bottom - rect.top : 0;
+    var bottom = menu ? rect.bottom - menu.getBoundingClientRect().top : 0;
+    return { top: Math.max(0, Math.round(top * k)), bottom: Math.max(0, Math.round(bottom * k)) };
+  }
+
   function layoutOrca(a) {
+    var ins = fieldInsets();
+    var fh = Math.max(60, H - ins.top - ins.bottom);      /* высота видимого поля */
     orca.artW = a.w; orca.artH = a.h;
-    orca.scale = Math.max(1, Math.min(4, Math.floor(H * 0.58 / a.h)));
+    var box = Math.min(fh * 0.52, W * 0.88);               /* кот = половина поля */
+    orca.scale = Math.max(1, Math.min(6, Math.floor(box / a.h)));
     orca.w = a.w * orca.scale;
     orca.h = a.h * orca.scale;
     orca.x = Math.round(W / 2 - orca.w / 2);
-    orca.y = Math.round(H * 0.44 - orca.h / 2);
+    orca.y = Math.round(ins.top + fh / 2 - orca.h / 2);
   }
   function relayout() { if (cv) layoutOrca(art()); }
 

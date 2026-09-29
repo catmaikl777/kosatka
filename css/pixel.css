@@ -25,6 +25,9 @@
   --pixel: 'Press Start 2P', 'PixelFallback', 'Courier New', monospace;
   --mono: 'PixelFallback', 'Courier New', monospace;
   --hud-h: 92px;
+  /* высота нижнего меню: js/fx.js перезаписывает её по факту,
+     значение ниже — запасной вариант до первого resize() */
+  --menu-h: 150px;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -196,7 +199,8 @@ canvas.px-icon { image-rendering: auto; vertical-align: middle; }
 .tap-hint {
   position: fixed;
   left: 50%;
-  bottom: 210px;
+  /* прямо над меню: fx.js публикует его высоту в --menu-h */
+  bottom: calc(var(--menu-h, 150px) + 14px);
   transform: translateX(-50%);
   z-index: 5;
   font-family: var(--pixel);
@@ -904,7 +908,7 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
 
 /* ================= АДАПТИВ ================= */
 @media (max-width: 480px) {
-  .menu { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); max-height: 42vh; }
+  .menu { grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); max-height: 30vh; }
   .pill { font-size: 8px; padding: 3px 5px; }
   .up-buy { flex-direction: row; }
   .up-buy .px-btn { min-width: 0; }
@@ -916,7 +920,6 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
   :root { --hud-h: 100px; }
   .menu { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); max-height: 34vh; }
   .menu-btn { flex-direction: row; padding: 8px 10px; }
-  .tap-hint { bottom: 240px; }
 }
 
 @media (max-height: 620px) {
@@ -937,15 +940,20 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
   .hud { padding: 4px 6px; gap: 4px; }
   .pill { font-size: 7px; padding: 2px 4px; }
 
-  /* Меню: кнопки ниже и компактнее, сетка шире по числу колонок */
+  /* Меню: компактнее, чем было. Кнопок 17, в 5 колонок они занимали
+     почти треть экрана, и поле оставалось узкой полосой. Ниже — 6-7
+     колонок, мелкие иконки и подписи в одну строку, чтобы меню занимало
+     ~22% высоты, а косатка получила нормальное поле. */
   .menu {
-    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-    max-height: 40vh;
-    padding: 6px;
-    gap: 5px;
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    max-height: 30vh;
+    padding: 5px 4px 6px;
+    gap: 4px;
   }
-  .menu-btn { flex-direction: column; padding: 7px 5px; font-size: 8px; }
-  .menu-btn .px-icon { width: 18px; height: 18px; }
+  .menu-btn { flex-direction: column; padding: 5px 2px 4px; gap: 2px; font-size: 7px; }
+  .menu-btn .px-icon { width: 16px; height: 16px; }
+  .mb-ic { height: 17px; }
+  .mb-name { line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* Панели и модалки не должны занимать весь экран */
   .px-panel { padding: 8px; }

@@ -781,6 +781,39 @@ if (sceneEl) {
     `${sceneEl.width}x${sceneEl.height}`);
 }
 
+/* ================= 12a-2. регресс: кот живёт в свободном поле ==========
+   Орангутина раньше считалась от высоты всего экрана (H*0.58), поэтому на
+   телефоне, где HUD и меню съедают ~40% высоты, она занимала практически
+   всё видимое поле. Теперь она вписывается в область между HUD и меню. */
+{
+  const hudEl = document.querySelector('.hud');
+  const menuEl = document.getElementById('menuBtns');
+  const VW = 390, VH = 844, HUD_H = 62, MENU_H = 150;
+  const rect = (w, h, top) => ({ left: 0, top, right: w, bottom: top + h, width: w, height: h, x: 0, y: top });
+  const saved = [sceneEl, hudEl, menuEl].map((el) => (el ? el.getBoundingClientRect : null));
+  const setRect = (el, r) => { if (el) el.getBoundingClientRect = () => r; };
+  setRect(sceneEl, rect(VW, VH, 0));
+  setRect(hudEl, rect(VW, HUD_H, 0));
+  setRect(menuEl, rect(VW, MENU_H, VH - MENU_H));
+
+  FX.resize();
+  const o = FX.orca;
+  /* переводим css-пиксели телефона в пиксели буфера */
+  const k = sceneEl.height / VH;
+  const fieldTop = HUD_H * k;
+  const fieldBot = (VH - MENU_H) * k;
+  const fieldH = fieldBot - fieldTop;
+  ok('кот помещается в свободное поле по вертикали',
+    o.y >= fieldTop - 1 && o.y + o.h <= fieldBot + 1,
+    `кот y=${o.y.toFixed(1)}..${(o.y + o.h).toFixed(1)}, поле ${fieldTop.toFixed(1)}..${fieldBot.toFixed(1)}`);
+  ok('кот занимает не больше 60% высоты поля',
+    o.h > 0 && o.h <= fieldH * 0.6,
+    `высота кота ${o.h.toFixed(1)} из поля ${fieldH.toFixed(1)} (${(o.h / fieldH * 100).toFixed(0)}%)`);
+
+  [sceneEl, hudEl, menuEl].forEach((el, i) => { if (el && saved[i]) el.getBoundingClientRect = saved[i]; });
+  FX.resize();
+}
+
 /* Арена боя рисуется в пропорциях 3:2 и не должна вылезать за контейнер */
 BATTLE.openPvP();
 document.getElementById('pvBot').click();

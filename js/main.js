@@ -223,20 +223,20 @@
     { id: 'shop', ic: 'i_coin', name: 'МАГАЗИН', fn: function () { UI.open('shop'); root.SHOP.showTab('upgrades'); } },
     { id: 'boxes', ic: 'i_gift', name: 'БОКСЫ', fn: function () { UI.open('shop'); root.SHOP.showTab('boxes'); } },
     { id: 'skins', ic: 'i_crown', name: 'СКИНЫ', fn: function () { UI.open('shop'); root.SHOP.showTab('skins'); } },
-    { id: 'fish', ic: 'fish', name: 'РЫБАЛКА', fn: function () { root.FISH.open(); } },
+    { id: 'fish', ic: 'fish', name: 'РЫБАЛКА', short: 'РЫБАЛ', fn: function () { root.FISH.open(); } },
     { id: 'quests', ic: 'i_book', name: 'КВЕСТЫ', fn: function () { UI.open('quests'); root.QUESTS.render(); } },
-    { id: 'ach', ic: 'i_star', name: 'ДОСТИЖЕНИЯ', fn: function () { UI.open('achievements'); root.QUESTS.render(); } },
-    { id: 'howto', ic: 'i_book', name: 'КАК ИГРАТЬ', fn: function () { UI.open('howto'); } },
+    { id: 'ach', ic: 'i_star', name: 'ДОСТИЖЕНИЯ', short: 'ДОСТ.', fn: function () { UI.open('achievements'); root.QUESTS.render(); } },
+    { id: 'howto', ic: 'i_book', name: 'КАК ИГРАТЬ', short: 'ИГРАТЬ', fn: function () { UI.open('howto'); } },
     { id: 'pvp', ic: 'i_sword', name: 'PvP', fn: function () { root.BATTLE.openPvP(); } },
     { id: 'raid', ic: 'i_team', name: 'РЕЙД 3x3', fn: function () { root.BATTLE.openRaid(); } },
     { id: 'clans', ic: 'i_team', name: 'КЛАНЫ', fn: function () { root.SOCIAL.openClans(); } },
     { id: 'lb', ic: 'i_ladder', name: 'ЛИДЕРЫ', fn: function () { root.SOCIAL.openLeaderboard(); } },
     { id: 'event', ic: 'ticket', name: 'ИВЕНТ', fn: function () { root.REW.openEvent(); } },
-    { id: 'stats', ic: 'i_ladder', name: 'СТАТИСТИКА', fn: function () { root.REW.openStats(); } },
-    { id: 'daily', ic: 'i_gift', name: 'НАГРАДА', fn: function () { root.REW.openDaily(); }, dot: 'dailyDot' },
+    { id: 'stats', ic: 'i_ladder', name: 'СТАТИСТИКА', short: 'СТАТ.', fn: function () { root.REW.openStats(); } },
+    { id: 'daily', ic: 'i_gift', name: 'НАГРАДА', short: 'НАГРАД', fn: function () { root.REW.openDaily(); }, dot: 'dailyDot' },
     { id: 'prestige', ic: 'shell', name: 'СБРОС', fn: function () { openPrestige(); } },
-    { id: 'auth', ic: 'i_lock', name: 'АККАУНТ', fn: function () { root.SOCIAL.openAuth(); } },
-    { id: 'settings', ic: 'i_anvil', name: 'НАСТРОЙКИ', fn: function () { UI.open('settings'); syncSettingsUI(); } }
+    { id: 'auth', ic: 'i_lock', name: 'АККАУНТ', short: 'АККАУН', fn: function () { root.SOCIAL.openAuth(); } },
+    { id: 'settings', ic: 'i_anvil', name: 'НАСТРОЙКИ', short: 'НАСТР.', fn: function () { UI.open('settings'); syncSettingsUI(); } }
   ];
 
   function wireMenu() {
@@ -245,13 +245,16 @@
     var html = '';
     for (var i = 0; i < MENU.length; i++) {
       var m = MENU[i];
-      html += '<button class="menu-btn" data-menu="' + m.id + '">' +
+      html += '<button class="menu-btn" data-menu="' + m.id + '" title="' + m.name + '">' +
         '<span class="mb-ic">' + root.SHOP.SPRHTML(m.ic, 2) + '</span>' +
-        '<span class="mb-name">' + m.name + '</span>' +
+        '<span class="mb-name">' + (m.short || m.name) + '</span>' +
         (m.dot ? '<span class="mb-dot hide" id="' + m.dot + '"></span>' : '') + '</button>';
     }
     box.innerHTML = html;
     root.SHOP.paintIcons(box);
+    /* меню только что появилось — пересчитываем поле под его реальную
+       высоту, чтобы косатка встала по центру свободной области */
+    if (root.FX && root.FX.resize) root.FX.resize();
     box.addEventListener('click', function (e) {
       var b = e.target.closest('[data-menu]');
       if (!b) return;
