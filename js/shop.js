@@ -161,15 +161,16 @@
     var html = '';
     for (var i = 0; i < D.BOXES.length; i++) {
       var b = D.BOXES[i];
-      var afford = ST.state.coins >= b.cost;
+      var afford10 = ST.state.coins >= b.cost * 10;
+      var afford1 = ST.state.coins >= b.cost;
       html += '<div class="px-card box-card" data-box="' + b.id + '">' +
         '<div class="box-art">' + SPRHTML(b.sprite, 3) + '</div>' +
         '<div class="box-meta">' +
         '<div class="box-name">' + b.name + ' ' + UI.rarityBadge(b.rar) + '</div>' +
         '<div class="box-desc">' + b.desc + '</div>' +
-        '<button class="px-btn px-btn-primary hold-open" data-act="box" data-id="' + b.id + '"' + (afford ? '' : ' disabled') + '>' +
-        (afford ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤') + '</button>' +
-        '<div class="box-hint">удерживай, чтобы открыть 10 подряд</div>' +
+        '<button class="px-btn px-btn-primary hold-open" data-act="box" data-id="' + b.id + '"' + (afford1 ? '' : ' disabled') + '>' +
+        (afford10 ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤') + '</button>' +
+        '<div class="box-hint">коснись — ×10, удерживай — подряд</div>' +
         '</div></div>';
     }
     box.innerHTML = html;
@@ -305,6 +306,7 @@
 
     /* тихое открытие при удержании: без модалки, короткая анимация карточки */
     if (quiet) {
+      holdOpened = true;
       var card = document.querySelector('.box-card[data-box="' + id + '"]');
       if (card) {
         card.classList.remove('box-bump');
@@ -406,6 +408,79 @@
       render();
       if (root.QUESTS) root.QUESTS.check();
     });
+  }
+
+  /* ---------- пачка ×10 ----------
+     Один тап по кнопке бокса открывает сразу десять: платим стоимость
+     за 10 (иначе игрок платил бы цену из подписи «×10», а открывался бы
+     один бокс — и деньги «уходили впустую»). Тяжёлая интрига для каждого
+     из десяти не нужна — короткий всплеск и список лута. */
+  var holdOpened = false;   /* фиксируем: удержание уже открыло боксы — клик не должен бить ещё раз */
+  function openBoxTen(id) {
+    if (rolling) return;
+    var b = null;
+    for (var i = 0; i < D.BOXES.length; i++) if (D.BOXES[i].id === id) b = D.BOXES[i];
+    if (!b) return;
+    var cost10 = b.cost * 10;
+    if (ST.state.coins < cost10) { root.SND.play('deny'); UI.toast('Не хватает косаток', 'bad', 'i_coin'); return; }
+    ST.spend(cost10);
+    rolling = true;
+    root.SND.play('box');
+    ST.state.stats.boxesOpened += 10;
+    ST.bump('boxesOpened', 10);
+    ST.bump('boxesOpenedDaily', 10);
+    if (b.fish) { ST.state.stats.fishBoxes += 10; ST.bump('fishBoxes', 10); }
+
+    var myToken = ++rollToken;
+    var live = function () { return myToken === rollToken; };
+    var done = false;
+    var rarCol = RAR_COLOR[b.rar] || RAR_COLOR.common;
+    var m = UI.modalShell('ОТКРЫТО ×10', '<div class="box-stage" style="--rar:' + rarCol + '">' +
+      '<div class="box-rays"></div>' +
+      '<div class="box-halo"></div>' +
+      '<div class="box-shake">' + SPRHTML(b.sprite, 4) + '</div>' +
+      '<div class="box-shine"></div>' +
+      '<div class="box-caption">10 ЯЩИКОВ…</div>' +
+      '</div>');
+    paintDialogIcons(m);
+
+    /* Закрытие до показа лута не теряет добычу: пачка уже оплачена —
+       отменяем фазы и выдаём лот сразу. */
+    m.addEventListener('click', function (e) {
+      if (!live() || done) return;
+      if (e.target !== m && !e.target.dataset.close) return;
+      rollToken++;
+      endRoll();
+      reveal();
+    });
+
+    function reveal() {
+      var rows = '';
+      var big = false;
+      for (var k = 0; k < 10; k++) {
+        var rr = rollLoot(b);
+        for (var j = 0; j < rr.length; j++) { big = big || !!rr[j].big; rows += lootRow(rr[j]); }
+      }
+      if (big) root.SND.play('rare');
+      m.querySelector('.px-modal-body').innerHTML =
+        '<div class="loot-reveal' + (big ? ' big-loot' : '') + '"><div class="loot-list">' + rows + '</div></div>';
+      paintDialogIcons(m);
+      rollTimers = [];
+      rolling = false;
+      done = true;
+      if (big) {
+        UI.banner('РЕДКИЙ ДРОП!', 'banner-rare', 1400);
+        FXcelebrate();
+      }
+      render();
+      if (root.QUESTS) root.QUESTS.check();
+    }
+
+    /* короткая интрига — как взрыв одиночного бокса, но быстро */
+    schedule(function () {
+      if (live()) { m.querySelector('.box-stage').classList.add('phase-burst'); root.SND.play('levelUp'); }
+    }, 380);
+    schedule(function () { if (live()) reveal(); }, 520);
   }
 
   function FXcelebrate() {
@@ -535,7 +610,15 @@
       else if (act === 'buy10') buy(b.dataset.id, '10');
       else if (act === 'buymax') buy(b.dataset.id, 'max');
       else if (act === 'skin') skinClick(b.dataset.id);
-      else if (act === 'box') openBox(b.dataset.id);
+      else if (act === 'box') {
+        /* удержание уже открыло боксы подряд — обычный клик после него
+           не должен бить ещё раз и списывать лишнее */
+        if (holdOpened) { holdOpened = false; return; }
+        var id = b.dataset.id, bb = null;
+        for (var i = 0; i < D.BOXES.length; i++) if (D.BOXES[i].id === id) bb = D.BOXES[i];
+        if (bb && ST.state.coins >= bb.cost * 10) openBoxTen(id);
+        else openBox(id);
+      }
       else if (act === 'rank') {
         var r = ST.claimRank(b.dataset.id);
         if (r) {
@@ -555,6 +638,7 @@
       if (!b || b.disabled) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
+      holdOpened = false;
       b.setPointerCapture && e.pointerId != null && b.setPointerCapture(e.pointerId);
       startHold(b.dataset.id);
     });
@@ -575,10 +659,11 @@
       var btn = card.querySelector('.hold-open');
       if (!btn) continue;
       var aff = ST.state.coins >= b.cost;
+      var aff10 = ST.state.coins >= b.cost * 10;
       if (btn.dataset.aff === String(aff)) continue;
       btn.dataset.aff = String(aff);
       btn.disabled = !aff;
-      btn.textContent = aff ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤';
+      btn.textContent = aff10 ? 'ОТКРЫТЬ ×10 · ' + ST.fmt(b.cost * 10) : ST.fmt(b.cost) + ' ❤';
     }
   }
 
@@ -613,7 +698,7 @@
 
   root.SHOP = {
     init: init, initClicks: initClicks, showTab: showTab, render: render,
-    openBox: openBox, rollLoot: rollLoot, renderPrestige: renderPrestige,
+    openBox: openBox, openBoxTen: openBoxTen, rollLoot: rollLoot, renderPrestige: renderPrestige,
     renderRanks: renderRanks, stopHold: stopHold,
     paintIcons: paintIcons, paintDialogIcons: paintDialogIcons, tick: tick, SPRHTML: SPRHTML, orcaHTML: orcaHTML
   };

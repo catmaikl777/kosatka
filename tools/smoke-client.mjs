@@ -644,6 +644,30 @@ ok('закрытие окна лута не выдаёт дополнитель�
   `${fmtSnap(snapDone)} → ${fmtSnap(snapClosed)}`);
 UI.closeAll();
 
+/* --- регресс: кнопка «ОТКРЫТЬ ×10» обязана открывать 10 боксов за 10 цен,
+   а не один бокс (раньше подпись обещала ×10, а открывался один — деньги
+   «уходили», ящик был один). --- */
+ST.state.coins = 1e12;
+const BOXT = DATA.BOXES[0];
+const boxesBeforeTen = ST.state.stats.boxesOpened;
+const snapBeforeTen = lootSnapshot();
+SHOP.openBoxTen(BOXT.id);
+ok('пачка ×10 списывает ровно 10 цен',
+  ST.state.coins === 1e12 - BOXT.cost * 10 && ST.state.stats.boxesOpened === boxesBeforeTen + 10,
+  `coins=${ST.state.coins} (жду ${1e12 - BOXT.cost * 10}), boxes ${boxesBeforeTen} → ${ST.state.stats.boxesOpened}`);
+await waitLoot();
+const tenSnap = lootSnapshot();
+ok('пачка ×10 выдаёт лут за все 10 боксов', lootGranted(snapBeforeTen, tenSnap, BOXT.cost * 10),
+  `${fmtSnap(snapBeforeTen)} → ${fmtSnap(tenSnap)}`);
+const tenRows = (openDialogs().pop()?.querySelectorAll('.loot-row') ?? []).length;
+ok('в окне пачки ровно 10 строк лута', tenRows === 10, `строк=${tenRows}`);
+ok('пачка ×10 повторно не выдаёт лут при закрытии', (() => {
+  const x = openDialogs().find(m => m.querySelector('[data-close]'))?.querySelector('[data-close]');
+  if (x && x.dispatchEvent) x.dispatchEvent({ type: 'click', target: x, bubbles: true });
+  return fmtSnap(lootSnapshot()) === fmtSnap(tenSnap);
+})(), fmtSnap(lootSnapshot()));
+await settle();
+
 /* --- утечка DOM: closeAll обязан удалять окна modalShell, а не прятать их.
        Иначе каждое открытие бокса навсегда оставляет поддерево в документе --- */
 /* сначала приводим DOM в покой, иначе считаем не свои окна */
