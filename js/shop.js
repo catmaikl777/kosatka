@@ -39,20 +39,24 @@
     for (var i = 0; i < D.UPGRADES.length; i++) {
       var u = D.UPGRADES[i];
       var lvl = ST.up(u.id);
+      var max = ST.maxLevel(u.id);
+      var maxed = ST.isMaxed(u.id);
       var cost = ST.upgradeCost(u.id);
-      var afford = ST.state.coins >= cost;
-      html += '<div class="px-card up-card' + (afford ? ' afford' : '') + '" data-up="' + u.id + '">' +
+      var afford = !maxed && ST.state.coins >= cost;
+      var lvlTxt = max === Infinity ? 'ур. ' + lvl : 'ур. ' + lvl + '/' + max;
+      var buyBtns = maxed
+        ? '<span class="up-max">МАКС</span>'
+        : '<button class="px-btn px-btn-small" data-act="buy1" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>' + ST.fmt(cost) + '</button>' +
+          '<button class="px-btn px-btn-small px-btn-alt" data-act="buy10" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>x10</button>' +
+          '<button class="px-btn px-btn-small px-btn-alt" data-act="buymax" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>MAX</button>';
+      html += '<div class="px-card up-card' + (afford ? ' afford' : '') + (maxed ? ' maxed' : '') + '" data-up="' + u.id + '">' +
         '<div class="up-ic">' + SPRHTML(u.icon, 2) + '</div>' +
         '<div class="up-info">' +
-        '<div class="up-name">' + u.name + '<span class="up-lvl">ур. ' + lvl + '</span></div>' +
+        '<div class="up-name">' + u.name + '<span class="up-lvl">' + lvlTxt + '</span></div>' +
         '<div class="up-desc">' + u.desc + '</div>' +
         '<div class="up-eff">сейчас: ' + currentEffect(u) + '</div>' +
         '</div>' +
-        '<div class="up-buy">' +
-        '<button class="px-btn px-btn-small" data-act="buy1" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>' + ST.fmt(cost) + '</button>' +
-        '<button class="px-btn px-btn-small px-btn-alt" data-act="buy10" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>x10</button>' +
-        '<button class="px-btn px-btn-small px-btn-alt" data-act="buymax" data-id="' + u.id + '"' + (afford ? '' : ' disabled') + '>MAX</button>' +
-        '</div></div>';
+        '<div class="up-buy">' + buyBtns + '</div></div>';
     }
     box.innerHTML = html;
   }
@@ -76,6 +80,11 @@
 
   function buy(id, mode) {
     var ok, res = null;
+    if (ST.isMaxed(id)) {
+      root.SND.play('deny');
+      UI.toast('Улучшение уже максимальное', 'bad', 'i_star');
+      return;
+    }
     if (mode === '1') ok = ST.buyUpgrade(id);
     else res = ST.buyMax(id, mode === '10' ? 10 : 1000);
     if (ok || (res && res.bought)) {

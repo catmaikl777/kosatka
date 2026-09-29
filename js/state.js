@@ -86,13 +86,24 @@
 
   /* ---------- формулы ---------- */
   function up(id) { return state.upgrades[id] || 0; }
+  /* Значение улучшения берём из data.js: раньше формулы ниже зашивали
+     1.4 / 1.35 / 1.03 в код, и правка balance-числа в одном месте ничего
+     не меняла. Теперь data.js — единственный источник правды. */
+  function uval(id, dflt) {
+    for (var i = 0; i < D.UPGRADES.length; i++) {
+      if (D.UPGRADES[i].id === id) {
+        return D.UPGRADES[i].val === undefined ? dflt : D.UPGRADES[i].val;
+      }
+    }
+    return dflt;
+  }
   function totalUpgrades() { var t = 0; for (var k in state.upgrades) t += state.upgrades[k]; return t; }
 
   function skinBonus() {
     for (var i = 0; i < D.SKINS.length; i++) if (D.SKINS[i].id === state.skin) return D.SKINS[i].bonus;
     return 0;
   }
-  function levelMult() { return 1 + 0.02 * (state.level - 1); }
+  function levelMult() { return 1 + 0.02 * (Math.min(state.level, D.MAX_LEVEL) - 1); }
   function shellMult() { return 1 + D.PRESTIGE.perShell * state.shells; }
   function clanMult() {
     var b = root.API && root.API.clanBonus ? root.API.clanBonus() : 0;
@@ -133,44 +144,50 @@
   function boostMult() { return tempMult(); }
 
   function allMult() {
-    return levelMult() * shellMult() * clanMult() * Math.pow(1.03, up('tide'));
+    return levelMult() * shellMult() * clanMult() * Math.pow(uval('tide', 1.03), up('tide'));
   }
 
   function perClick(combo) {
-    var flat = 1 + up('fin') * 1 + up('voice') * 2 + up('echo') * 5;
-    var mult = Math.pow(1.4, up('power')) * Math.pow(1.35, up('claw'));
+    var flat = 1 + up('fin') * uval('fin', 1) + up('voice') * uval('voice', 2) + up('echo') * uval('echo', 5);
+    var mult = Math.pow(uval('power', 1.4), up('power')) * Math.pow(uval('claw', 1.35), up('claw'));
     var v = flat * mult * allMult() * (1 + skinBonus());
     v *= comboMult(combo);
     v *= fxMult('click');
     v *= boostMult();
     return v;
   }
+  function autoCps() {
+    return up('mini') * uval('mini', 0.5) + up('hunter') * uval('hunter', 2) +
+      up('drone') * uval('drone', 8) + up('fleet') * uval('fleet', 30);
+  }
   function perSecond() {
-    var cps = up('mini') * 0.5 + up('hunter') * 2 + up('drone') * 8 + up('fleet') * 30;
-    return cps * allMult() * (1 + skinBonus()) * fxMult('auto') * boostMult();
+    return autoCps() * allMult() * (1 + skinBonus()) * fxMult('auto') * boostMult();
   }
   function comboMult(combo) {
     if (!combo) combo = root.CLICK ? root.CLICK.combo : 0;
-    var lvl = up('combo');
+    var lvl = up('combo') * uval('combo', 1);
     return 1 + Math.min(combo, 50) * 0.01 * (1 + lvl * 0.5);
   }
   function critChance() {
-    var c = 0.05 + up('crit') * 0.02;
+    var c = 0.05 + up('crit') * uval('crit', 2) / 100;
     if (root.CLICK && root.CLICK.buffStorm) c = 1;
     return Math.min(1, c);
   }
   function critMult() {
-    return (3 + up('rage') * 0.25) * (1 + 0.25 * (state.level - 1) * 0.1);
+    return (3 + up('rage') * uval('rage', 0.25)) * (1 + 0.25 * (Math.min(state.level, D.MAX_LEVEL) - 1) * 0.1);
   }
   function fishValue() {
-    return 100 * state.level * (1 + up('magnet')) * shellMult();
+    return 100 * state.level * (1 + up('magnet') * uval('magnet', 0.4)) * shellMult();
   }
   function luck() {
-    return 1 + up('luck') * 0.05;
+    return 1 + up('luck') * uval('luck', 0.05);
   }
 
   function xpNeed(level) {
-    return Math.floor(60 * Math.pow(level, 1.55));
+    /* (D.XP_K)·level² — уровень растёт медленно и не «улетает» за час.
+       XP_K живёт в data.js и подбирается симулятором tools/balance.mjs.
+       Опыт капает с добытых монет (×0.06). */
+    return Math.floor((D.XP_K || 180) * level * level);
   }
   function rank() {
     var r = D.TITLES[0].name;
@@ -203,7 +220,21 @@
     var u = null;
     for (var i = 0; i < D.UPGRADES.length; i++) if (D.UPGRADES[i].id === id) u = D.UPGRADES[i];
     if (!u) return Infinity;
+    if (up(id) >= maxLevel(id)) return Infinity;   /* всё выкуплено */
     return Math.ceil(u.cost * Math.pow(u.growth, up(id)));
+  }
+  function maxLevel(id) {
+    for (var i = 0; i < D.UPGRADES.length; i++) {
+      if (D.UPGRADES[i].id === id) {
+        return D.UPGRADES[i].max === undefined ? Infinity : D.UPGRADES[i].max;
+      }
+    }
+    return 0;
+  }
+  function isMaxed(id) { return up(id) >= maxLevel(id); }
+  function maxedAll() {
+    for (var i = 0; i < D.UPGRADES.length; i++) if (!isMaxed(D.UPGRADES[i].id)) return false;
+    return true;
   }
   function buyUpgrade(id) {
     var cost = upgradeCost(id);
@@ -309,12 +340,13 @@
   function addXp(n) {
     state.xp += n;
     var leveled = 0;
-    while (state.xp >= xpNeed(state.level)) {
+    while (state.level < D.MAX_LEVEL && state.xp >= xpNeed(state.level)) {
       state.xp -= xpNeed(state.level);
       state.level++;
       leveled++;
       bump('level');
     }
+    if (state.level >= D.MAX_LEVEL) state.xp = 0;
     if (leveled) {
       save();
       emit('levelup', state.level);
@@ -346,7 +378,7 @@
   }
 
   function clickTickets() {
-    var div = up('ticket') > 0 ? up('ticket') : D.EVENT.clickDiv;
+    var div = up('ticket') > 0 ? uval('ticket', 50) : D.EVENT.clickDiv;
     return state.stats.clicks % div === 0 && state.stats.clicks > 0;
   }
   function addTickets(n) {
@@ -469,13 +501,14 @@
     load: load, save: save, flush: flush, reset: reset,
     fmt: fmt, fmtTime: fmtTime, fmtFullTime: fmtFullTime,
     up: up, totalUpgrades: totalUpgrades,
-    perClick: perClick, perSecond: perSecond, critChance: critChance, critMult: critMult,
+    perClick: perClick, perSecond: perSecond, autoCps: autoCps, critChance: critChance, critMult: critMult,
     comboMult: comboMult, fishValue: fishValue, luck: luck, xpNeed: xpNeed,
     rank: rank, levelMult: levelMult, shellMult: shellMult, allMult: allMult,
     fxMult: fxMult, tempMult: tempMult, addBuff: addBuff,
     rankInfo: rankInfo, rankClaimed: rankClaimed, rankAvailable: rankAvailable,
     nextRank: nextRank, claimRank: claimRank,
     upgradeCost: upgradeCost, buyUpgrade: buyUpgrade, buyMax: buyMax,
+    maxLevel: maxLevel, isMaxed: isMaxed, maxedAll: maxedAll,
     skin: skin, buySkin: buySkin, equipSkin: equipSkin, unlockSkin: unlockSkin,
     unlockEffect: unlockEffect, hasEffect: hasEffect, effectOn: effectOn,
     addCoins: addCoins, spend: spend, addXp: addXp, addFish: addFish, addShells: addShells,

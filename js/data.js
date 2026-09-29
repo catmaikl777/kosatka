@@ -4,24 +4,31 @@
 (function (root) {
   'use strict';
 
-  /* ---------- улучшения ---------- */
+  /* ---------- улучшения ----------
+     Баланс. Цена уровня растёт как growth, сила — как val. Рост цены заметно
+     выше роста силы: каждый следующий уровень копится дольше, поэтому доход
+     не «улетает». max — предел уровней: у прохождения есть чёткий финал
+     («всё выкуплено»). Уровни 1-100 проходятся быстро, дальше длинный хвост.
+
+     Числа подобраны симулятором tools/balance.mjs под ~6 месяцев игры по часу
+     в день (все улучшения на максимуме к ~185-му дню), без бесконечного дохода. */
   var UPGRADES = [
-    { id: 'fin', name: 'Хвостовой плавник', desc: '+1 за клик', icon: 'img_clickup', cost: 15, growth: 1.15, kind: 'clickFlat', val: 1 },
-    { id: 'voice', name: 'Голос стаи', desc: '+2 за клик', icon: 'i_siren', cost: 120, growth: 1.16, kind: 'clickFlat', val: 2 },
-    { id: 'echo', name: 'Эхолокация', desc: '+5 за клик', icon: 'i_crit', cost: 1400, growth: 1.17, kind: 'clickFlat', val: 5 },
-    { id: 'power', name: 'Сила стаи', desc: '×1.40 за клик', icon: 'i_magnet', cost: 600, growth: 1.55, kind: 'clickMult', val: 1.4 },
-    { id: 'claw', name: 'Когти', desc: '×1.35 за клик', icon: 'i_sword', cost: 6500, growth: 1.6, kind: 'clickMult', val: 1.35 },
-    { id: 'crit', name: 'Критический укус', desc: '+2% крит', icon: 'i_crit', cost: 900, growth: 1.2, kind: 'critAdd', val: 2 },
-    { id: 'rage', name: 'Ярость', desc: '+25% силы крита', icon: 'i_flame', cost: 4500, growth: 1.22, kind: 'critDmg', val: 0.25 },
-    { id: 'combo', name: 'Синхронность', desc: '+1 к множителю комбо', icon: 'i_ladder', cost: 12000, growth: 1.3, kind: 'comboAdd', val: 1 },
-    { id: 'luck', name: 'Удачная волна', desc: '+5% к качеству лута', icon: 'i_star', cost: 7000, growth: 1.25, kind: 'luckAdd', val: 0.05 },
-    { id: 'mini', name: 'Малыш-автокликер', desc: '+0.5 клика/сек', icon: 'img_autoup', cost: 100, growth: 1.13, kind: 'cpsAdd', val: 0.5 },
-    { id: 'hunter', name: 'Охотник-автокликер', desc: '+2 клика/сек', icon: 'img_autoup', cost: 2800, growth: 1.14, kind: 'cpsAdd', val: 2 },
-    { id: 'drone', name: 'Дрон-рыболов', desc: '+8 кликов/сек', icon: 'img_autoup', cost: 65000, growth: 1.15, kind: 'cpsAdd', val: 8 },
-    { id: 'fleet', name: 'Промышленный флот', desc: '+30 кликов/сек', icon: 'img_autoup', cost: 1600000, growth: 1.16, kind: 'cpsAdd', val: 30 },
-    { id: 'tide', name: 'Прилив', desc: '+3% ко всем кликам/сек', icon: 'i_magnet', cost: 95000, growth: 1.18, kind: 'allMult', val: 1.03 },
-    { id: 'magnet', name: 'Магнит рыбы', desc: '+40% выручки за рыбу', icon: 'i_fish', cost: 30000, growth: 1.2, kind: 'fishMult', val: 0.4 },
-    { id: 'ticket', name: 'Билет удачи', desc: 'Билет ивента за 50 кликов', icon: 'i_book', cost: 500000, growth: 1.4, kind: 'ticketDiv', val: 50 }
+    { id: 'fin', name: 'Хвостовой плавник', desc: '+0.18 за клик', icon: 'img_clickup', cost: 15, growth: 1.5, max: 60, kind: 'clickFlat', val: 0.18 },
+    { id: 'voice', name: 'Голос стаи', desc: '+0.72 за клик', icon: 'i_siren', cost: 150, growth: 1.5, max: 50, kind: 'clickFlat', val: 0.72 },
+    { id: 'echo', name: 'Эхолокация', desc: '+2.7 за клик', icon: 'i_crit', cost: 2000, growth: 1.5, max: 40, kind: 'clickFlat', val: 2.7 },
+    { id: 'power', name: 'Сила стаи', desc: '×1.011 за клик', icon: 'i_magnet', cost: 500, growth: 1.061, max: 35, kind: 'clickMult', val: 1.011 },
+    { id: 'claw', name: 'Когти', desc: '×1.009 за клик', icon: 'i_sword', cost: 9000, growth: 1.059, max: 30, kind: 'clickMult', val: 1.009 },
+    { id: 'crit', name: 'Критический укус', desc: '+2% крит', icon: 'i_crit', cost: 900, growth: 1.5, max: 20, kind: 'critAdd', val: 2 },
+    { id: 'rage', name: 'Ярость', desc: '+25% силы крита', icon: 'i_flame', cost: 5000, growth: 1.5, max: 20, kind: 'critDmg', val: 0.25 },
+    { id: 'combo', name: 'Синхронность', desc: '+1 к множителю комбо', icon: 'i_ladder', cost: 15000, growth: 1.5, max: 20, kind: 'comboAdd', val: 1 },
+    { id: 'luck', name: 'Удачная волна', desc: '+5% к качеству лута', icon: 'i_star', cost: 8000, growth: 1.5, max: 20, kind: 'luckAdd', val: 0.05 },
+    { id: 'mini', name: 'Малыш-автокликер', desc: '+0.18 клика/сек', icon: 'img_autoup', cost: 100, growth: 1.5, max: 50, kind: 'cpsAdd', val: 0.18 },
+    { id: 'hunter', name: 'Охотник-автокликер', desc: '+1.44 клика/сек', icon: 'img_autoup', cost: 3500, growth: 1.5, max: 45, kind: 'cpsAdd', val: 1.44 },
+    { id: 'drone', name: 'Дрон-рыболов', desc: '+10.8 кликов/сек', icon: 'img_autoup', cost: 120000, growth: 1.5, max: 35, kind: 'cpsAdd', val: 10.8 },
+    { id: 'fleet', name: 'Промышленный флот', desc: '+90 кликов/сек', icon: 'img_autoup', cost: 5000000, growth: 1.5, max: 30, kind: 'cpsAdd', val: 90 },
+    { id: 'tide', name: 'Прилив', desc: '×1.009 ко всем кликам', icon: 'i_magnet', cost: 95000, growth: 1.059, max: 30, kind: 'allMult', val: 1.009 },
+    { id: 'magnet', name: 'Магнит рыбы', desc: '+40% выручки за рыбу', icon: 'i_fish', cost: 30000, growth: 1.5, max: 25, kind: 'fishMult', val: 0.4 },
+    { id: 'ticket', name: 'Билет удачи', desc: 'Билет ивента за 50 кликов', icon: 'i_book', cost: 500000, growth: 1.5, max: 5, kind: 'ticketDiv', val: 50 }
   ];
 
   /* ---------- скины (кошки из репозитория orca-clicker) ----------
@@ -120,6 +127,16 @@
      click — множитель клика, auto — множитель кликов/сек.
      Множители складываются, итог ограничен FX_MULT_CAP. */
   var FX_MULT_CAP = 100;
+  /* Предел уровня. Пока уровень растёт бесконечно, его бонус (+2% к доходу
+     и рост силы крита) кормит сам себя: опыт капает с монет, монеты — с
+     дохода. Из-за этой петли доход обгонял любую цену, и игра «зависала».
+     Уровни 1-100 идут быстро (это и есть финальный титул), дальше — длинный
+     хвост до MAX_LEVEL, чтобы прогресс не обрывался. */
+  var MAX_LEVEL = 500;
+  /* Во сколько раз опыт за уровень тяжелее базового (180·level²). Больше —
+     уровни идут медленнее; подобрано так, чтобы уровень 100 брался в начале,
+     а MAX_LEVEL — длинным хвостом к концу прохождения. */
+  var XP_K = 400;
   var EFFECTS = [
     { id: 'e1', name: 'Золотой клик', icon: 'i_coin', rar: 'common', click: 2, auto: 1, desc: 'Клик ×2. Криты летят золотыми искрами.' },
     { id: 'e2', name: 'Неоновый свет', icon: 'i_bolt', rar: 'common', click: 1, auto: 1.5, desc: 'Доход ×1.5. Свечение вокруг кошки.' },
@@ -368,7 +385,7 @@
     DAILY_REWARD: DAILY_REWARD, FISH_TYPES: FISH_TYPES,
     FIELD_BONUSES: FIELD_BONUSES, TITLES: TITLES, RANKS: RANKS,
     EVENT: EVENT, CLAN: CLAN, AD: AD, PRESTIGE: PRESTIGE,
-    FX_MULT_CAP: FX_MULT_CAP,
+    FX_MULT_CAP: FX_MULT_CAP, MAX_LEVEL: MAX_LEVEL, XP_K: XP_K,
     RAR_COLORS: RAR_COLORS, RAR_NAMES: RAR_NAMES,
     freshState: freshState
   };

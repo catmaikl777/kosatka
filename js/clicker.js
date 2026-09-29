@@ -177,7 +177,9 @@
     if (comboTimer && now - comboTimer > COMBO_WINDOW) combo = 0;
 
     clickTimes = clickTimes.filter(function (t) { return now - t < 1000; });
-    var cps = clickTimes.length;
+    /* Кликов в секунду = ручные + автокликеры. Раньше считались только
+       ручные, и достижения на 100/1000 кликов/сек были недостижимы. */
+    var cps = clickTimes.length + ST.autoCps();
     if (cps > ST.state.stats.bestCps) {
       ST.state.stats.bestCps = cps;
       ST.bump('bestCps');
