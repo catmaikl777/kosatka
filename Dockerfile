@@ -10,7 +10,13 @@ RUN apk add --no-cache tini
 
 WORKDIR /app
 
-# Зависимостей нет, копируем только нужное
+# Зависимости ставятся отдельным слоем: так кэш Docker переживает правки
+# кода и не пересобирает npm при каждом деплое. Раньше шага не было вовсе,
+# и образ стартовал без pg → CrashLoop при DATABASE_URL.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Копируем только нужное
 COPY server ./server
 COPY index.html ./index.html
 COPY sw.js ./sw.js

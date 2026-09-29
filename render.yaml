@@ -10,7 +10,7 @@ services:
     plan: starter            # WebSocket на free-плане засыпает через 15 минут простоя
     region: frankfurt        # europe
     branch: main
-    buildCommand: ""         # сборки нет: зависимостей нет
+    buildCommand: npm ci --omit=dev    # нужен для драйвера pg (PostgreSQL)
     startCommand: node server/server.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -21,6 +21,10 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0        # Render сам подставляет PORT
+      # Задайте в панели Render. Пока пусто — сервер работает на файловой
+      # базе в /data/db.json (нужен смонтированный диск, он ниже).
+      - key: DATABASE_URL
+        sync: false
       - key: DATA_FILE
         value: /data/db.json
       - key: STATIC_DIR

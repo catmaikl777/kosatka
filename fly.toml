@@ -5,6 +5,7 @@
 #    2) fly volumes create kosatka_data --size 1
 #    3) fly deploy
 #    4) fly secrets set PUBLIC_URL=https://<app>.fly.dev
+#    5) (опционально, но надёжнее) fly secrets set DATABASE_URL='postgresql://...'
 #
 #  ВАЖНО: масштабировать только до 1 машины. Лобби, рейды и аккаунты
 #  живут в памяти процесса, две реплики = два разных мира.
