@@ -286,9 +286,21 @@ function clanBonus(cl) {
 }
 function clanState(cl, role) {
   if (!cl) return null;
+  /* members — подробный список участников ({id, name, role, score}),
+     а не число: вкладка «Клан» рисует из него таблицу. Раньше сюда
+     приходило число, и список участников был всегда пуст. */
+  const members = cl.members.map(mid => {
+    const a = db.accounts[mid];
+    return {
+      id: mid,
+      name: a ? a.name : ('#' + mid),
+      role: roleIn(cl, mid),
+      score: a ? (a.seasonScore || 0) : 0
+    };
+  });
   return {
     id: cl.id, name: cl.name, code: cl.code, role: role || null,
-    members: cl.members.length, treasury: Math.floor(cl.treasury),
+    members, treasury: Math.floor(cl.treasury),
     bonus: clanBonus(cl), score: Math.floor(cl.score || 0)
   };
 }
@@ -502,18 +514,26 @@ function broadcastLobby(l) {
   for (const p of l.players) if (p.c) send(p.c, { t: 'pvp:joined', lobby: view, id: p.c.lastId });
   pvpLobbyList();
 }
-function pvpLobbyList() {
+function pvpLobbyList(asker) {
   const rows = [...lobbies.values()].map(lobbyView);
   for (const c of clients) {
     const l = c.lobbyId ? lobbies.get(c.lobbyId) : null;
-    send(c, { t: 'pvp:lobbies', rows, my: l ? lobbyView(l) : null });
+    const msg = { t: 'pvp:lobbies', rows, my: l ? lobbyView(l) : null };
+    if (c === asker) msg.rid = c.lastId;
+    send(c, msg);
   }
 }
-function raidTeamList() {
+function raidTeamList(asker) {
   const rows = [...teams.values()].map(teamView);
   for (const c of clients) {
     const tm = c.teamId ? teams.get(c.teamId) : null;
-    send(c, { t: 'raid:teams', rows, my: tm ? teamView(tm) : null });
+    const msg = { t: 'raid:teams', rows, my: tm ? teamView(tm) : null };
+    /* Ответ на ПРЯМОЙ запрос помечаем rid — иначе промис API.raidTeams()
+       висел до таймаута, и список/«моя комната» не отрисовывались при
+       открытии окна. Рассылка идёт без rid: иначе можно было бы задеть
+       чужой ожидающий запрос (клиент ищет промис только по rid). */
+    if (c === asker) msg.rid = c.lastId;
+    send(c, msg);
   }
 }
 
@@ -910,7 +930,7 @@ function lobbyView(l) {
 }
 function lobbyOf(c) { return c.lobbyId ? lobbies.get(c.lobbyId) : null; }
 function pvpRoute(c, t, m, open) {
-  if (t === 'pvp:lobbies') return pvpLobbyList();
+  if (t === 'pvp:lobbies') return pvpLobbyList(c);
   if (!c.acc) return err(c, t, 'сначала войди в аккаунт');
   const l = lobbyOf(c);
 
@@ -1055,7 +1075,7 @@ function teamView(t) {
 function teamMembers(t) { return t.players.map(p => p.name); }
 function teamOf(c) { return c.teamId ? teams.get(c.teamId) : null; }
 function raidRoute(c, t, m, open) {
-  if (t === 'raid:teams') return raidTeamList();
+  if (t === 'raid:teams') return raidTeamList(c);
   if (!c.acc) return err(c, t, 'сначала войди в аккаунт');
   const tm = teamOf(c);
 
@@ -1147,6 +1167,9 @@ function endRaid(t, aborted) {
   /* Раньше первая команда получала win при равенстве, а вторая — нет.
      Теперь ничья честно отдаётся обоим. */
   const draw = !aborted && foe && myScore === foeScore;
+  /* игроков НЕ отцепляем от команды (раньше тут стояло p.c.teamId = null):
+     иначе после боя команда оставалась в списке «открытых», но my был null —
+     панель своей комнаты исчезала, и выйти/удалить её было нечем. */
   for (const p of t.players) {
     if (!p.c) continue;
     send(p.c, {
@@ -1154,7 +1177,6 @@ function endRaid(t, aborted) {
       win: !aborted && !draw && myScore > foeScore, draw,
       myClicks: t.clicks
     });
-    p.c.teamId = null;
   }
   if (foe) {
     for (const p of foe.players) {
@@ -1164,7 +1186,6 @@ function endRaid(t, aborted) {
         win: !aborted && !draw && foeScore > myScore, draw,
         myClicks: foe.clicks
       });
-      p.c.teamId = null;
     }
     foe.foeId = 0; foe.state = 'wait'; foe.endAt = 0;
     pushTeam(foe);

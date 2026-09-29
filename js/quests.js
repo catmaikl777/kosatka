@@ -114,6 +114,18 @@
     ST.save();
   }
 
+  /* секретный скин «Ричи» открывается, когда закрыты ВСЕ достижения */
+  function grantSecretSkin() {
+    if (ST.state.skinsOwned.indexOf('richi') >= 0) return;
+    for (var i = 0; i < D.ACHIEVEMENTS.length; i++) {
+      if (!ST.state.achievementsClaimed[D.ACHIEVEMENTS[i].id]) return;
+    }
+    if (!ST.unlockSkin('richi')) return;
+    root.SND.play('legend');
+    UI.banner('СЕКРЕТНЫЙ СКИН!', 'banner-rare', 1800);
+    UI.toast('Открыт скин: Ричи!', 'good', 'i_crown');
+  }
+
   /* ---------- проверка ---------- */
   function check() {
     rollover();
@@ -138,6 +150,7 @@
       }
     }
     if (UI.isOpen('quests') || UI.isOpen('achievements')) render();
+    grantSecretSkin();
   }
 
   /* ---------- отрисовка ---------- */

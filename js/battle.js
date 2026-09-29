@@ -469,7 +469,13 @@
     var box = modal && modal.querySelector('#rdList');
     if (!box) return;
     if (!API.online) { box.innerHTML = '<div class="dim">Сервер недоступен</div>'; return; }
-    API.raidTeams().then(renderTeams).catch(function () {
+    /* полный ответ {rows, my}: список команд для #rdList и «моя команда»
+       для панели #rdMyTeam (ранее my терялся — после создания комнаты
+       игрок не видел её и не мог выйти/удалить) */
+    API.raidTeams().then(function (m) {
+      renderTeams((m && m.rows) || []);
+      showMyTeam((m && m.my) || null);
+    }).catch(function () {
       var b = modal && modal.querySelector('#rdList');
       if (b) b.innerHTML = '<div class="dim">Не удалось получить список команд</div>';
     });
@@ -567,7 +573,9 @@
     });
     API.on('pvp:left', function () { if (modal && mode === 'pvp') { showMyLobby(null); refreshLobbies(); } });
 
-    API.on('raid:teams', function (m) { if (modal && mode === 'raid') renderTeams(m.rows); });
+    API.on('raid:teams', function (m) {
+      if (modal && mode === 'raid') { renderTeams((m && m.rows) || []); showMyTeam((m && m.my) || null); }
+    });
     API.on('raid:team', function (m) { if (modal && mode === 'raid') showMyTeam(m.team); });
     API.on('raid:start', function (m) {
       botMode = false;

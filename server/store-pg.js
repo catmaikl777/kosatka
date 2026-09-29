@@ -189,7 +189,7 @@ function create(db, opts) {
       await client.query(
         'INSERT INTO meta (key, value) VALUES ($1,$2),($3,$4) ' +
         'ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
-        ['seq', String(seq)], ['seasonEnd', String(seasonEnd)]
+        ['seq', String(seq), 'seasonEnd', String(seasonEnd)]
       );
       await client.query('COMMIT');
       lastAcc = snapshot(db.accounts);

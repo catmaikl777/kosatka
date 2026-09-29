@@ -244,7 +244,9 @@
   function pvpClicks(n) { return send('pvp:clicks', { n: n }).catch(function () {}); }
 
   /* ---------- Рейд 3x3 ---------- */
-  function raidTeams() { return sendSafe('raid:teams').then(pickList); }
+  /* отдаёт полный ответ {rows, my}: рендеру нужен и список команд,
+     и «моя команда» (иначе после создания комнаты она не видна) */
+  function raidTeams() { return sendSafe('raid:teams'); }
   function raidCreate(open) { return send('raid:create', { open: open !== false }, 8000); }
   function raidJoin(id) { return send('raid:join', { id: id }, 8000); }
   function raidLeave() { return send('raid:leave', {}, 8000).catch(function () {}); }

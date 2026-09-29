@@ -47,10 +47,20 @@ function makeFake(seed) {
     }
     return { rows: [] };
   }
+  /* query() вызываем как настоящий pg: (text) | (text, values) | (text, values, cb).
+     Лишний аргумент обязан падать (как в pg), а не молча игнорироваться —
+     иначе ошибка «callback is not a function» просочится в прод. */
+  function run(...args) {
+    const q = args[0], p = args[1] || [], cb = args[2];
+    if (args.length > 2) throw new Error('callback is not a function');
+    const r = exec(q, p);
+    if (cb) cb(null, r);
+    return r;
+  }
   const pool = {
     on() {},
-    query(q, p) { return Promise.resolve(exec(q, p)); },
-    connect() { return Promise.resolve({ query(q, p) { return Promise.resolve(exec(q, p)); }, release() {} }); },
+    query(...args) { return Promise.resolve(run.apply(null, args)); },
+    connect() { return Promise.resolve({ query(...args) { return Promise.resolve(run.apply(null, args)); }, release() {} }); },
     end() { return Promise.resolve(); }
   };
   return { pool, T, queries };
@@ -127,6 +137,10 @@ function writes(fake) { return fake.queries.filter((x) => /^(INSERT|DELETE)/i.te
     ok(accWrites.length === 1, 'изменённый аккаунт пишется один раз (не вся база)');
     ok(accWrites[0].p[0] === 1 && JSON.parse(accWrites[0].p[4]).state.coins === 99, 'в pg уходят правильные id и свежие данные');
     ok(w.some((x) => /INSERT INTO meta/i.test(x.q)), 'seq/seasonEnd фиксируются');
+    const metaW = w.find((x) => /INSERT INTO meta/i.test(x.q));
+    ok(metaW && metaW.p && metaW.p.length === 4 &&
+      metaW.p[0] === 'seq' && metaW.p[2] === 'seasonEnd',
+      'meta пишется одним массивом параметров, а не парой аргументов (иначе pg упадёт с «callback is not a function»');
     await store.close();
   }
 

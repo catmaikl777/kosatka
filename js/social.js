@@ -224,10 +224,10 @@
         }).catch(function (e) { UI.toast(e.message, 'bad', 'ticket'); });
       });
       if (c.members && c.members.length) {
-        var h = '<table class="px-table"><tr><th>Игрок</th><th>Вклад</th></tr>';
+        var h = '<table class="px-table"><tr><th>Игрок</th><th>Очки</th></tr>';
         for (var i = 0; i < c.members.length; i++) {
           h += '<tr><td>' + esc(c.members[i].name) + (c.members[i].role === 'owner' ? ' 👑' : '') + '</td><td>' +
-            ST.fmt(c.members[i].contribution) + '</td></tr>';
+            ST.fmt(c.members[i].score) + '</td></tr>';
         }
         mem.innerHTML = h + '</table>';
       } else mem.innerHTML = '<div class="dim">—</div>';

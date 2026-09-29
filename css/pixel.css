@@ -85,7 +85,13 @@ canvas.px-icon { image-rendering: auto; vertical-align: middle; }
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 20;
-  padding: 6px 8px 0;
+  /* На iPhone с вырезом/чкапкой (PWA, viewport-fit=cover) шапка наезжала
+     на статус-бар: сдвигаем содержимое в безопасную зону. constant() —
+     для старых iOS 11.x, env() — для актуальных. */
+  padding-top: calc(6px + constant(safe-area-inset-top, 0px));
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  padding-left: 8px;
+  padding-right: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -937,7 +943,7 @@ textarea.px-input { min-height: 90px; resize: vertical; font-size: 10px; }
   html, body { font-size: 12px; }
 
   /* HUD компактнее */
-  .hud { padding: 4px 6px; gap: 4px; }
+  .hud { padding: 4px 6px; gap: 4px; padding-top: calc(4px + env(safe-area-inset-top, 0px)); }
   .pill { font-size: 7px; padding: 2px 4px; }
 
   /* Меню: компактнее, чем было. Кнопок 17, в 5 колонок они занимали

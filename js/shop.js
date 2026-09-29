@@ -106,6 +106,8 @@
     for (var i = 0; i < D.SKINS.length; i++) {
       var s = D.SKINS[i];
       var owned = ST.state.skinsOwned.indexOf(s.id) >= 0;
+      /* секретный скин не показываем в магазине до открытия */
+      if (s.secret && !owned) continue;
       var eq = ST.state.skin === s.id;
       var locked = !owned && !s.cost;
       var label = owned ? (eq ? 'НАДЕТ' : 'НАДЕТЬ') : locked ? lockLabel(s) : ST.fmt(s.cost);

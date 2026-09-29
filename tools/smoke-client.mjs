@@ -477,6 +477,33 @@ ok('карточки улучшений содержат спрайты и це�
 SHOP.paintIcons();
 ok('paintIcons не падает', true);
 
+/* --- регресс: секретный скин не должен быть виден в магазине до открытия --- */
+{
+  const secret = DATA.SKINS.find(s => s.secret);
+  if (!secret) { ok('в данных есть секретный скин', false, 'нет'); }
+  else {
+    ST.state.skinsOwned = ST.state.skinsOwned.filter(id => id !== secret.id);
+    SHOP.render('skins');
+    let html = document.getElementById('shopSkins').innerHTML;
+    ok('секретный скин скрыт в магазине до открытия',
+      html.indexOf(secret.id) < 0 && html.indexOf(secret.name) < 0,
+      secret.id);
+    /* открывается за 100% достижений — и тогда появляется в магазине */
+    const claim = ST.state.achievementsClaimed;
+    const savedClaim = Object.assign({}, claim);
+    for (const a of DATA.ACHIEVEMENTS) claim[a.id] = 1;
+    QUESTS.check();
+    ok('100% достижений открывает секретный скин', ST.state.skinsOwned.includes(secret.id),
+      ST.state.skinsOwned.join(','));
+    SHOP.render('skins');
+    html = document.getElementById('shopSkins').innerHTML;
+    ok('после открытия секретный скин виден в магазине',
+      html.indexOf(secret.id) >= 0, secret.id);
+    ST.state.achievementsClaimed = savedClaim;
+    ST.state.skinsOwned = ST.state.skinsOwned.filter(id => id !== secret.id);
+  }
+}
+
 /* ================= 4. скин ================= */
 const skinsBefore = ST.state.skinsOwned.length;
 const skin = DATA.SKINS.find(s => s.cost && !s.box && !s.event && !s.raid && !s.secret);

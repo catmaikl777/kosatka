@@ -509,8 +509,15 @@ ok('в клан нельзя вступить без аккаунта', noAuth =
 await B.sb.API.register('Кашалот', 'killerpass');
 await sleep(400);
 const joinClan = clan ? await B.sb.API.clanJoin(clan.code).catch(e => null) : null;
-ok('игрок B вступил в клан по коду', !!(joinClan && joinClan.clan && joinClan.clan.members === 2),
-  JSON.stringify(joinClan && joinClan.clan));
+ok('игрок B вступил в клан по коду', !!(joinClan && joinClan.clan && joinClan.clan.members && joinClan.clan.members.length === 2),
+  JSON.stringify(joinClan && joinClan.clan).slice(0, 160));
+/* регресс: members — это СПИСОК участников, а не число. Раньше сервер
+   слал число, вкладка «Клан» его игнорировала и список был пуст. */
+const membersList = joinClan && joinClan.clan && joinClan.clan.members;
+ok('список участников клана содержит обоих: владельца и вступившего',
+  !!(membersList && membersList.some(m => m.name === 'Косатка' && m.role === 'owner') &&
+    membersList.some(m => m.name === 'Кашалот' && m.role === 'member')),
+  JSON.stringify(membersList).slice(0, 200));
 const health2 = await fetch(`http://127.0.0.1:${PORT}/api/health`).then(r => r.json()).catch(() => null);
 ok('health показывает 1 клан и живых игроков', !!(health2 && health2.clans === 1 && health2.players >= 4), JSON.stringify(health2));
 
@@ -579,6 +586,17 @@ const team = teamRes && teamRes.team;
 ok('рейд: команда создана', !!(team && team.id), JSON.stringify(team).slice(0, 140));
 ok('рейд: в команде 1 игрок', !!(team && team.players === 1 && team.names && team.names.length === 1),
   JSON.stringify(team).slice(0, 140));
+/* регресс: после создания команды игрок должен видеть «свою комнату».
+   Клиент рисует её из поля my ответа raid:teams; раньше API отдавал только
+   rows (pickList), а обработчик события игнорировал my — комната не
+   показывалась, и выйти/удалить её было нечем. */
+const myTeams = await A.sb.API.raidTeams().catch(() => null);
+ok('рейд: в ответе raid:teams есть my — комната видна сразу после создания',
+  !!(myTeams && myTeams.my && myTeams.my.id === team.id && myTeams.my.players === 1),
+  JSON.stringify(myTeams && myTeams.my).slice(0, 140));
+ok('рейд: моя команда есть и в списке открытых команд',
+  !!(myTeams && Array.isArray(myTeams.rows) && myTeams.rows.some(r => r.id === team.id)),
+  JSON.stringify(myTeams && myTeams.rows).slice(0, 140));
 
 /* второй игрок вступает в открытую команду */
 const joinTeam = await D.sb.API.raidJoin(team.id).catch(() => null);
@@ -634,6 +652,36 @@ if (raidStart) {
   ok('рейд: бой завершился результатом', !!rend, rend ? `победитель=${rend.winner || rend.win}`
     : `таймаут: тиков=${raidTicks.length}, боевой режим=${A.sb.CLICK.battleMode}, ` +
       `последний тик=${JSON.stringify(raidTicks[raidTicks.length - 1])}`);
+}
+
+/* регресс: из комнаты можно выйти, и после выхода её не видно (my = null) */
+if (team) {
+  D.sb.API.send('raid:leave', {}).catch(() => {});
+  await sleep(500);
+  const dTeams = await D.sb.API.raidTeams().catch(() => null);
+  ok('рейд: после выхода my = null (комната больше не моя)',
+    !!(dTeams && dTeams.my === null), JSON.stringify(dTeams && dTeams.my));
+  const stillThere = !!(dTeams && Array.isArray(dTeams.rows) && dTeams.rows.some(r => r.id === team.id));
+  ok('рейд: команда осталась в списке (в ней ещё создатель)',
+    stillThere, JSON.stringify(dTeams && dTeams.rows).slice(0, 140));
+}
+
+/* регресс (UI): открытое окно рейда показывает «мою комнату» с кнопкой выхода.
+   Раньше refreshTeams() висел на таймауте (сервер не отдавал rid), а обработчик
+   события игнорировал my — панель была пустой, и выйти/удалить комнату было нечем. */
+{
+  A.sb.BATTLE.openRaid();
+  const gotMy = await waitFrame(A, () => {
+    const box = A.doc.querySelector('#rdMyTeam');
+    return !!(box && box.querySelector('#rdLeave'));
+  }, 5000);
+  const myBox = A.doc.querySelector('#rdMyTeam');
+  ok('рейд: в окне видна своя комната с кнопкой «ВЫЙТИ ИЗ КОМАНДЫ»', !!gotMy,
+    myBox ? String(myBox.innerHTML || '').slice(0, 100) : 'нет #rdMyTeam');
+  const rdList = A.doc.querySelector('#rdList');
+  ok('рейд: список открытых команд отрисован', !!(rdList && rdList.children.length > 0),
+    rdList ? rdList.children.length : 'нет #rdList');
+  A.sb.BATTLE.close();
 }
 
 /* ================= 7. ивент ================= */
