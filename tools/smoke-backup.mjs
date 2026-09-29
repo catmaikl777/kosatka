@@ -43,6 +43,9 @@ const gh = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', c => chunks.push(c));
   req.on('end', () => {
+    /* сервер отдельно спрашивает сам репозиторий, чтобы отличить
+       «снимка ещё нет» от «токен не имеет доступа» */
+    if (req.url.indexOf('/contents/') < 0) return json(res, 200, { private: true, default_branch: 'main' });
     if (req.method === 'PUT') {
       const b = JSON.parse(Buffer.concat(chunks).toString());
       stored = { sha: 'sha-' + (++puts), content: b.content };

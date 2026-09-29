@@ -416,6 +416,7 @@ main().then(async () => {
     const fakeOk = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     const fetchImpl = async (url, opt) => {
       calls.push({ url: url, opt: opt });
+      if (url.indexOf('/contents/') < 0) return fakeOk({ private: true, default_branch: 'main' });
       if (!opt || opt.method === 'PUT') {
         const b = JSON.parse(opt.body);
         stored = { sha: 'sha2', content: b.content };
@@ -482,6 +483,45 @@ main().then(async () => {
       b3.stop();
       return t === null || t.hasRef() === false;
     })());
+
+    /* 404 от GitHub бывает двух видов: «файла нет» и «токен не имеет
+       доступа». Раньше второй случай молча считался «снимка нет» — сервер
+       думал, что всё в порядке, и не бэкапил вообще. */
+    const notFound = (repoOk) => async (url, opt) => {
+      if (url.indexOf('/contents/') < 0) {
+        return repoOk ? fakeOk({ private: true, default_branch: 'main' })
+          : { ok: false, status: 404, json: async () => ({}), text: async () => 'Not Found' };
+      }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => 'Not Found' };
+    };
+
+    const noAccess = BACKUP.create({ env: ENV, fetchImpl: notFound(false), getJson: () => '{}' });
+    ok('токен без доступа к репозиторию — это ошибка, а не «снимка нет»',
+      (await noAccess.restore()) === null && /не видит репозиторий/.test(noAccess.state.error || ''),
+      String(noAccess.state.error));
+    ok('ошибка записи без доступа объясняет, что делать',
+      /не видит репозиторий/.test(noAccess.state.error || '') &&
+      /Only select repositories/.test(noAccess.state.error || ''), String(noAccess.state.error));
+    ok('ошибка записи без права на запись отделена от «нет доступа»',
+      (await noAccess.flush(false)) === false && /не видит репозиторий/.test(noAccess.state.error || ''),
+      String(noAccess.state.error));
+
+    const canSee = BACKUP.create({ env: ENV, fetchImpl: notFound(true), getJson: () => '{}' });
+    ok('репозиторий виден, снимка нет — это норма, ошибок нет',
+      (await canSee.restore()) === null && canSee.state.error === null, String(canSee.state.error));
+    await canSee.flush(false);
+    ok('репозиторий виден, но запись запрещена — подсказка про Contents',
+      /не может записывать/.test(canSee.state.error || ''), String(canSee.state.error));
+
+    const canSeePut = async (url, opt) => {
+      if (url.indexOf('/contents/') < 0) return fakeOk({ private: true });
+      if (opt && opt.method === 'PUT') return { ok: false, status: 404, json: async () => ({}), text: async () => 'Not Found' };
+      return { ok: false, status: 404, json: async () => ({}), text: async () => 'Not Found' };
+    };
+    const roWrite = BACKUP.create({ env: ENV, fetchImpl: canSeePut, getJson: () => '{}' });
+    ok('ветки нет — пишем понятное сообщение, а не сырой JSON GitHub',
+      (await roWrite.flush(true)) === false && !/documentation_url/.test(roWrite.state.error || ''),
+      String(roWrite.state.error));
   }
 
   console.log('');

@@ -87,13 +87,45 @@ async function errText(res) {
   }
 }
 
+/* Виден ли репозиторий токену? Нужна, чтобы отличить «снимка ещё нет»
+   (404 на файле — это нормально) от «токен не имеет доступа к репозиторию»
+   (тоже 404, но это поломка, и о ней обязательно надо сказать). */
+async function checkRepo(fetchImpl, c) {
+  const res = await fetchImpl(c.api + '/repos/' + c.repo, {
+    headers: headers(c),
+    signal: AbortSignal.timeout(c.timeoutMs)
+  });
+  if (res.status === 404 || res.status === 401 || res.status === 403) return { seen: false };
+  if (!res.ok) return { seen: null };
+  let j = null;
+  try { j = await res.json(); } catch (e) { /* ignore */ }
+  return { seen: true, private: !!(j && j.private), branch: (j && j.default_branch) || null };
+}
+
+/* Человеческое объяснение вместо сырого JSON от GitHub. */
+function accessHint(c, seen) {
+  if (seen === false) {
+    return 'токен не видит репозиторий ' + c.repo + '. Проверь: 1) репозиторий существует и приватный, ' +
+      '2) у fine-grained токена в Repository access выбрано «Only select repositories» и туда добавлен ' +
+      c.repo + ' (по умолчанию список пустой!), 3) у классического PAT есть scope repo, ' +
+      '4) токен не истёк. Без этого бэкапа данные будут теряться при каждом редеплое.';
+  }
+  return 'токен видит репозиторий ' + c.repo + ', но не может записывать — у него нет права ' +
+    'Contents: Read and write (у fine-grained токена: Repository permissions → Contents).';
+}
+
 /* Снимок с GitHub: { sha, json } либо null, если файла ещё нет. */
 async function fetchSnapshot(fetchImpl, c) {
   const res = await fetchImpl(contentsUrl(c), { headers: headers(c), signal: AbortSignal.timeout(c.timeoutMs) });
-  if (res.status === 404) return null;           /* снимка ещё нет — это не ошибка */
+  if (res.status === 404) {
+    /* 404 бывает двух видов: файла нет (норма) или доступа нет (поломка) */
+    const repo = await checkRepo(fetchImpl, c);
+    if (repo.seen === false) throw new Error(accessHint(c, repo.seen));
+    return null;
+  }
   if (res.status === 401 || res.status === 403) {
     throw new Error('GitHub ' + res.status + ' — токен не проходит или нет доступа к ' + c.repo +
-      ' (нужен contents:write). ' + await errText(res));
+      ' (нужен Contents: Read and write). ' + await errText(res));
   }
   if (!res.ok) throw new Error('GitHub ' + res.status + ': ' + await errText(res));
   const j = await res.json();
@@ -118,6 +150,11 @@ async function pushSnapshot(fetchImpl, c, json, sha) {
     signal: AbortSignal.timeout(c.timeoutMs)
   });
   if (!res.ok) {
+    if (res.status === 404) {
+      const repo = await checkRepo(fetchImpl, c);
+      throw new Error(repo.seen === false ? accessHint(c, repo.seen)
+        : 'GitHub 404 при записи — ветка ' + c.branch + ' не найдена или нет права на запись. ' + accessHint(c, repo.seen));
+    }
     const err = new Error('GitHub ' + res.status + ': ' + await errText(res));
     err.status = res.status;
     throw err;
@@ -218,4 +255,4 @@ function create(opts) {
   return { config: c, state: state, restore: restore, flush: flush, start: start, stop: stop };
 }
 
-module.exports = { create, readConfig, fetchSnapshot, pushSnapshot, DEFAULTS, MIN_EVERY_MS };
+module.exports = { create, readConfig, checkRepo, accessHint, fetchSnapshot, pushSnapshot, DEFAULTS, MIN_EVERY_MS };
